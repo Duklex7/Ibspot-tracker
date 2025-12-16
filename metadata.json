@@ -1,0 +1,5 @@
+{
+  "name": "Ibspot Tracker",
+  "description": "Plataforma minimalista de registro y contabilidad de códigos ISIN para Ibspot con análisis de rendimiento y ranking de usuarios.",
+  "requestFramePermissions": []
+}
