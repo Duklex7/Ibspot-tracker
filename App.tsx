@@ -137,7 +137,6 @@ export default function App() {
     
     // Cloud Config State
     const [isCloudConnected, setIsCloudConnected] = useState(false);
-    const [firebaseConfigInput, setFirebaseConfigInput] = useState('');
     
     // Theme State
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -193,16 +192,43 @@ export default function App() {
             setEntries(newEntries);
         });
 
-        const unsubUsers = storage.subscribeToUsers((newUsers) => {
-            setUsers(newUsers);
-            // Re-validate current user in case they were deactivated remotely
-            const current = storage.getCurrentUser();
-            const updatedCurrent = newUsers.find(u => u.id === current.id);
-            if (updatedCurrent && !updatedCurrent.active) {
-                // Switch to first active if I was deactivated
-                const firstActive = newUsers.find(u => u.active) || newUsers[0];
-                setCurrentUser(firstActive);
-                storage.setCurrentUser(firstActive.id);
+        // ----------------------------------------------------
+        // AUTO-SYNC LOGIC (CRITICAL FOR FIRST TIME UPLOAD)
+        // ----------------------------------------------------
+        const unsubUsers = storage.subscribeToUsers((cloudUsers) => {
+            // "Anti-burro" logic:
+            // If I have local users (like Alexander) that are NOT in the cloud list,
+            // it means I created them offline or before connecting.
+            // I must push them to the cloud so everyone else can see them.
+            
+            const localUsers = storage.getUsers();
+            
+            // Find users that exist locally but not in cloud
+            const missingInCloud = localUsers.filter(local => 
+                !cloudUsers.some(cloud => cloud.id === local.id)
+            );
+
+            if (missingInCloud.length > 0) {
+                console.log("Detectados usuarios locales no sincronizados. Subiendo a la nube...", missingInCloud);
+                // We add the missing ones to the cloud list to prevent overwriting existing ones
+                // Note: storage.saveUsers iterates and sets individual docs, so this is safe.
+                storage.saveUsers(missingInCloud).then(() => {
+                    console.log("Usuarios sincronizados con éxito.");
+                });
+            } else {
+                // Perfect sync, update UI
+                setUsers(cloudUsers);
+
+                // Re-validate current user in case they were deactivated remotely
+                const current = storage.getCurrentUser();
+                const updatedCurrent = cloudUsers.find(u => u.id === current.id);
+                if (updatedCurrent && !updatedCurrent.active) {
+                    const firstActive = cloudUsers.find(u => u.active) || cloudUsers[0];
+                    if (firstActive) {
+                        setCurrentUser(firstActive);
+                        storage.setCurrentUser(firstActive.id);
+                    }
+                }
             }
         });
 
@@ -271,7 +297,7 @@ export default function App() {
             setIsAddingUser(false);
         }
         setUsers(newUsers);
-        storage.saveUsers(newUsers);
+        storage.saveUsers(newUsers); // This now pushes to cloud
         setUserNameInput('');
         setCustomAvatar(null);
         if (editingUser === currentUser.id) {
@@ -290,12 +316,13 @@ export default function App() {
                  return;
              }
         }
-        const newUsers = users.map(u => u.id === userId ? { ...u, active: !currentStatus } : u);
-        setUsers(newUsers);
-        storage.saveUsers(newUsers);
+        // Optimistic update
+        const updatedUsers = users.map(u => u.id === userId ? { ...u, active: !currentStatus } : u);
+        setUsers(updatedUsers); 
+        storage.saveUsers(updatedUsers); // Push to cloud
 
         if (userId === currentUser.id && currentStatus) {
-            const nextUser = newUsers.find(u => u.active);
+            const nextUser = updatedUsers.find(u => u.active);
             if (nextUser) {
                 setCurrentUser(nextUser);
                 storage.setCurrentUser(nextUser.id);
@@ -474,48 +501,6 @@ export default function App() {
         setShowExportMenu(false);
     };
 
-    const handleSaveCloudConfig = () => {
-        try {
-            const input = firebaseConfigInput.trim();
-            const config: any = {};
-            const regex = /(?:["']?(\w+)["']?)\s*:\s*(["'])(.*?)\2/g;
-            
-            let match;
-            let foundAny = false;
-            
-            while ((match = regex.exec(input)) !== null) {
-                const key = match[1];
-                const value = match[3];
-                config[key] = value;
-                foundAny = true;
-            }
-            
-            if (!foundAny) {
-                 try {
-                     let cleanInput = input;
-                     if (cleanInput.endsWith(';')) cleanInput = cleanInput.slice(0, -1);
-                     if (!cleanInput.startsWith('{')) cleanInput = `{${cleanInput}}`;
-                     const jsonParse = JSON.parse(cleanInput);
-                     Object.assign(config, jsonParse);
-                 } catch (e) {
-                 }
-            }
-
-            if (!config.apiKey || !config.projectId) {
-                throw new Error("No se encontraron 'apiKey' o 'projectId' válidos.");
-            }
-
-            storage.saveFirebaseConfig(config);
-            setIsCloudConnected(true);
-            setView('dashboard');
-            alert("¡Conexión establecida con éxito! La página se recargará ahora.");
-            window.location.reload(); 
-        } catch (e) {
-            console.error(e);
-            alert("No se pudo interpretar el código. \n\nPor favor, copia todo el bloque de configuración (incluyendo o excluyendo llaves, no importa).");
-        }
-    };
-
     // --- Render Views ---
 
     const renderEntryView = () => (
@@ -590,7 +575,7 @@ export default function App() {
         <div className="max-w-2xl mx-auto">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Conexión Online</h2>
             <p className="text-gray-500 dark:text-gray-400 mb-8">
-                Para que todos los usuarios vean los datos en tiempo real, conecta la aplicación a una base de datos de Firebase.
+                El estado de la conexión a la base de datos compartida.
             </p>
 
             <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm">
@@ -600,9 +585,10 @@ export default function App() {
                             <Cloud size={40} className="text-green-600 dark:text-green-400" />
                         </div>
                         <div>
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conectado a la Nube</h3>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Sincronizado</h3>
                             <p className="text-gray-500 dark:text-gray-400 mt-2">
-                                Los registros se sincronizan automáticamente entre todos los dispositivos conectados.
+                                Estás conectado a la base de datos global de Ibspot. <br/>
+                                <span className="text-xs">Tus datos locales y usuarios creados se han fusionado con la nube.</span>
                             </p>
                         </div>
                         <div className="flex gap-4 justify-center">
@@ -610,45 +596,17 @@ export default function App() {
                                 onClick={() => storage.syncLocalToCloud()}
                                 className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center gap-2"
                             >
-                                <UploadCloud size={18} /> Subir datos locales
-                            </button>
-                            <button 
-                                onClick={() => storage.clearFirebaseConfig()}
-                                className="px-4 py-2 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors flex items-center gap-2"
-                            >
-                                <CloudOff size={18} /> Desconectar
+                                <UploadCloud size={18} /> Forzar Sincronización Manual
                             </button>
                         </div>
                     </div>
                 ) : (
-                    <div className="space-y-6">
-                        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-900/50 text-sm text-blue-800 dark:text-blue-300">
-                            <strong>Instrucciones:</strong>
-                            <ol className="list-decimal ml-5 mt-2 space-y-1">
-                                <li>Ve a <a href="https://console.firebase.google.com" target="_blank" className="underline">console.firebase.google.com</a> y crea un proyecto.</li>
-                                <li>Crea una base de datos <strong>Firestore</strong> (en modo prueba o producción).</li>
-                                <li>Ve a Configuración del Proyecto y copia la configuración del SDK (botón "Configuración Web").</li>
-                                <li>Pega el código abajo (acepta cualquier formato).</li>
-                            </ol>
+                    <div className="text-center py-8">
+                         <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <CloudOff size={40} className="text-red-600 dark:text-red-400" />
                         </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Configuración Firebase</label>
-                            <textarea
-                                value={firebaseConfigInput}
-                                onChange={(e) => setFirebaseConfigInput(e.target.value)}
-                                placeholder='Pega aquí lo que copiaste. Ejemplo: apiKey: "...", projectId: "..."'
-                                className="w-full h-40 p-4 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
-                            ></textarea>
-                        </div>
-
-                        <button 
-                            onClick={handleSaveCloudConfig}
-                            disabled={!firebaseConfigInput}
-                            className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-3 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
-                        >
-                            Conectar y Sincronizar
-                        </button>
+                        <h3 className="text-xl font-bold text-red-600 dark:text-red-400">Sin Conexión</h3>
+                        <p className="text-gray-500 mt-2">Verifica tu internet. La app funciona offline pero no sincronizará.</p>
                     </div>
                 )}
             </div>
