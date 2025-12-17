@@ -1,6 +1,7 @@
 export interface User {
     id: string;
     name: string;
+    email?: string;
     avatar: string;
     active: boolean;
 }
@@ -33,6 +34,4 @@ export interface FirebaseConfig {
 export const DEFAULT_USERS: User[] = [
     { id: 'u1', name: 'Ana García', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ana', active: true },
     { id: 'u2', name: 'Carlos Ruiz', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Carlos', active: true },
-    { id: 'u3', name: 'Maria Lopez', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Maria', active: true },
-    { id: 'u4', name: 'Juan Perez', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan', active: true },
 ];

@@ -33,10 +33,17 @@ import {
     Cloud,
     CloudOff,
     UploadCloud,
-    RefreshCw
+    RefreshCw,
+    LogOut,
+    LogIn,
+    UserPlus,
+    Mail,
+    Lock,
+    User as UserIcon,
+    Loader2
 } from 'lucide-react';
 import { ActivityChart, ComparisonChart } from './components/DashboardCharts';
-import { DEFAULT_USERS, User, IsinEntry, TimeFrame, FirebaseConfig } from './types';
+import { User, IsinEntry, TimeFrame } from './types';
 import * as storage from './services/storageService';
 import * as geminiService from './services/geminiService';
 
@@ -73,6 +80,150 @@ const formatDate = (dateStr: string) => {
 };
 
 // --- Components ---
+
+const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
+    const [isRegistering, setIsRegistering] = useState(false);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
+    const [avatar, setAvatar] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            if (file.size > 500000) { 
+                setError("La imagen es demasiado grande. Máx 500KB.");
+                return;
+            }
+            const reader = new FileReader();
+            reader.onloadend = () => setAvatar(reader.result as string);
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        setLoading(true);
+
+        try {
+            if (isRegistering) {
+                if (!name.trim()) throw new Error("El nombre es obligatorio");
+                await storage.registerUser(email, password, name, avatar || undefined);
+            } else {
+                await storage.loginUser(email, password);
+            }
+            onLoginSuccess();
+        } catch (err: any) {
+            console.error(err);
+            if (err.code === 'auth/invalid-credential') {
+                setError("Correo o contraseña incorrectos.");
+            } else if (err.code === 'auth/email-already-in-use') {
+                setError("Este correo ya está registrado.");
+            } else if (err.code === 'auth/weak-password') {
+                setError("La contraseña debe tener al menos 6 caracteres.");
+            } else {
+                setError("Error de conexión o datos inválidos.");
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-8 border border-gray-100 dark:border-slate-700">
+                <div className="text-center mb-8">
+                    <div className="w-16 h-16 bg-red-600 rounded-2xl flex items-center justify-center text-white font-bold text-3xl mx-auto mb-4 shadow-lg shadow-red-200 dark:shadow-none">I</div>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Ibspot Tracker</h1>
+                    <p className="text-gray-500 dark:text-gray-400 mt-2">
+                        {isRegistering ? 'Crea tu cuenta profesional' : 'Inicia sesión para continuar'}
+                    </p>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    {isRegistering && (
+                        <>
+                            <div className="flex justify-center mb-6">
+                                <div className="relative group cursor-pointer">
+                                    <div className="w-24 h-24 rounded-full overflow-hidden bg-gray-100 dark:bg-slate-700 border-2 border-dashed border-gray-300 dark:border-slate-600 flex items-center justify-center">
+                                        {avatar ? (
+                                            <img src={avatar} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <Camera className="text-gray-400" size={32} />
+                                        )}
+                                    </div>
+                                    <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
+                                    <p className="text-xs text-center mt-2 text-gray-400">Tu Foto (Opcional)</p>
+                                </div>
+                            </div>
+                            <div className="relative">
+                                <UserIcon className="absolute left-3 top-3 text-gray-400" size={20} />
+                                <input 
+                                    type="text" 
+                                    placeholder="Nombre Completo"
+                                    value={name}
+                                    onChange={e => setName(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
+                                    required
+                                />
+                            </div>
+                        </>
+                    )}
+                    
+                    <div className="relative">
+                        <Mail className="absolute left-3 top-3 text-gray-400" size={20} />
+                        <input 
+                            type="email" 
+                            placeholder="Correo electrónico"
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
+                            required
+                        />
+                    </div>
+                    <div className="relative">
+                        <Lock className="absolute left-3 top-3 text-gray-400" size={20} />
+                        <input 
+                            type="password" 
+                            placeholder="Contraseña"
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
+                            required
+                            minLength={6}
+                        />
+                    </div>
+
+                    {error && (
+                        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-xl text-sm flex items-center gap-2">
+                            <AlertCircle size={16} /> {error}
+                        </div>
+                    )}
+
+                    <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        {loading ? <Loader2 className="animate-spin" /> : (isRegistering ? 'Registrarse' : 'Entrar')}
+                    </button>
+                </form>
+
+                <div className="mt-6 text-center">
+                    <button 
+                        onClick={() => { setIsRegistering(!isRegistering); setError(null); }}
+                        className="text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                    >
+                        {isRegistering ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate aquí'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const SidebarItem = ({ icon: Icon, label, active, onClick, extraClass = "", badge = null }: any) => (
     <button
@@ -133,12 +284,12 @@ export default function App() {
     const [view, setView] = useState<'dashboard' | 'entry' | 'history' | 'users' | 'cloud'>('entry');
     const [entries, setEntries] = useState<IsinEntry[]>([]);
     const [users, setUsers] = useState<User[]>([]);
-    const [currentUser, setCurrentUser] = useState<User>(DEFAULT_USERS[0]);
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [authLoading, setAuthLoading] = useState(true);
     const [timeFrame, setTimeFrame] = useState<TimeFrame>('day');
     
     // Cloud Config State
     const [isCloudConnected, setIsCloudConnected] = useState(false);
-    const [isSyncing, setIsSyncing] = useState(false);
     
     // Theme State
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -158,12 +309,6 @@ export default function App() {
     const [aiInsight, setAiInsight] = useState<string | null>(null);
     const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
-    // User Management State
-    const [editingUser, setEditingUser] = useState<string | null>(null);
-    const [userNameInput, setUserNameInput] = useState('');
-    const [customAvatar, setCustomAvatar] = useState<string | null>(null);
-    const [isAddingUser, setIsAddingUser] = useState(false);
-
     // History Filter State
     const [historySearchIsin, setHistorySearchIsin] = useState('');
     const [historyUserFilter, setHistoryUserFilter] = useState('');
@@ -171,63 +316,30 @@ export default function App() {
 
     // Load data & Setup Subscriptions
     useEffect(() => {
-        const cloudStatus = storage.isOnline();
-        setIsCloudConnected(cloudStatus);
+        setIsCloudConnected(storage.isOnline());
         
-        // Initial Load
+        // Initial Local Data Load
         setEntries(storage.getEntries());
-        
-        // Setup Users
-        const loadedUsers = storage.getUsers();
-        setUsers(loadedUsers);
-        const savedUser = storage.getCurrentUser();
-        const validUser = loadedUsers.find(u => u.id === savedUser.id);
-        if (validUser && validUser.active) {
-            setCurrentUser(validUser);
-        } else {
-            const activeUser = loadedUsers.find(u => u.active) || loadedUsers[0];
-            setCurrentUser(activeUser);
-            storage.setCurrentUser(activeUser.id);
-        }
+        setUsers(storage.getUsers());
 
-        // AUTO-SYNC ON MOUNT:
-        // If we are online, we immediately attempt to push our local data to the cloud.
-        // This ensures the "Master" device (the one with the data) populates the cloud
-        // for other devices to see.
-        if (cloudStatus) {
-            setIsSyncing(true);
-            storage.syncLocalToCloud(true).finally(() => {
-                setTimeout(() => setIsSyncing(false), 2000);
-            });
-        }
+        // 1. Subscribe to Auth State
+        const unsubAuth = storage.subscribeToAuth((user) => {
+            setCurrentUser(user);
+            setAuthLoading(false);
+        });
 
-        // Real-time Subscriptions (If online)
+        // 2. Subscribe to Data (Entries)
         const unsubEntries = storage.subscribeToEntries((newEntries) => {
             setEntries(newEntries);
         });
 
+        // 3. Subscribe to Data (Users List for Leaderboard)
         const unsubUsers = storage.subscribeToUsers((cloudUsers) => {
             setUsers(cloudUsers);
-            
-            // Check if our current local user was just wiped or doesn't exist in cloud (should be fixed by auto-sync above)
-            const current = storage.getCurrentUser();
-            const updatedCurrent = cloudUsers.find(u => u.id === current.id);
-            
-            if (updatedCurrent) {
-                if (!updatedCurrent.active) {
-                   const firstActive = cloudUsers.find(u => u.active) || cloudUsers[0];
-                   if (firstActive) {
-                       setCurrentUser(firstActive);
-                       storage.setCurrentUser(firstActive.id);
-                   }
-                } else {
-                    // Update local reference to match cloud (e.g. name change)
-                    setCurrentUser(updatedCurrent);
-                }
-            }
         });
 
         return () => {
+            unsubAuth && unsubAuth();
             unsubEntries && unsubEntries();
             unsubUsers && unsubUsers();
         };
@@ -247,90 +359,10 @@ export default function App() {
 
     const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
-    // Change User
-    const handleUserChange = (userId: string) => {
-        const user = users.find(u => u.id === userId);
-        if (user && user.active) {
-            setCurrentUser(user);
-            storage.setCurrentUser(userId);
+    const handleLogout = async () => {
+        if (confirm("¿Cerrar sesión?")) {
+            await storage.logoutUser();
         }
-    };
-
-    // --- Handlers ---
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            if (file.size > 500000) { // Limit to 500KB
-                alert("La imagen es demasiado grande. Por favor usa una imagen menor a 500KB.");
-                return;
-            }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setCustomAvatar(reader.result as string);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleSaveUser = () => {
-        if (!userNameInput.trim()) return;
-        let newUsers = [...users];
-        const defaultAvatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userNameInput.trim())}`;
-        const finalAvatar = customAvatar || defaultAvatar;
-
-        if (editingUser) {
-            newUsers = newUsers.map(u => u.id === editingUser ? { ...u, name: userNameInput.trim(), avatar: finalAvatar } : u);
-            setEditingUser(null);
-        } else {
-            const newUser: User = {
-                id: crypto.randomUUID(),
-                name: userNameInput.trim(),
-                avatar: finalAvatar,
-                active: true
-            };
-            newUsers.push(newUser);
-            setIsAddingUser(false);
-        }
-        setUsers(newUsers);
-        storage.saveUsers(newUsers); // This now pushes to cloud
-        setUserNameInput('');
-        setCustomAvatar(null);
-        if (editingUser === currentUser.id) {
-            setCurrentUser(newUsers.find(u => u.id === editingUser)!);
-        }
-    };
-
-    const handleToggleUserStatus = (userId: string, currentStatus: boolean) => {
-        const activeCount = users.filter(u => u.active).length;
-        if (currentStatus && activeCount <= 1) {
-            alert("Debe haber al menos un usuario activo.");
-            return;
-        }
-        if (userId === currentUser.id && currentStatus) {
-             if (!confirm("Estás a punto de desactivar tu usuario actual. La sesión cambiará a otro usuario disponible. ¿Continuar?")) {
-                 return;
-             }
-        }
-        // Optimistic update
-        const updatedUsers = users.map(u => u.id === userId ? { ...u, active: !currentStatus } : u);
-        setUsers(updatedUsers); 
-        storage.saveUsers(updatedUsers); // Push to cloud
-
-        if (userId === currentUser.id && currentStatus) {
-            const nextUser = updatedUsers.find(u => u.active);
-            if (nextUser) {
-                setCurrentUser(nextUser);
-                storage.setCurrentUser(nextUser.id);
-            }
-        }
-    };
-
-    const startEditUser = (user: User) => {
-        setUserNameInput(user.name);
-        setEditingUser(user.id);
-        const isGenerated = user.avatar.includes('api.dicebear.com');
-        setCustomAvatar(isGenerated ? null : user.avatar);
-        setIsAddingUser(true);
     };
 
     const filteredEntries = useMemo(() => {
@@ -401,6 +433,8 @@ export default function App() {
 
     const handleAddEntry = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!currentUser) return;
+        
         const cleaned = isinInput.trim().toUpperCase();
 
         if (cleaned.length < 8) { 
@@ -426,16 +460,19 @@ export default function App() {
 
         const updated = [newEntry, ...entries];
         setEntries(updated); // Optimistic
-        await storage.saveEntry(newEntry);
+        try {
+            await storage.saveEntry(newEntry);
+            setIsinInput('');
+            setLastAdded(cleaned);
+            setEntryStatus('success');
 
-        setIsinInput('');
-        setLastAdded(cleaned);
-        setEntryStatus('success');
-
-        setTimeout(() => {
-            setEntryStatus('idle');
-            setLastAdded(null);
-        }, 3000);
+            setTimeout(() => {
+                setEntryStatus('idle');
+                setLastAdded(null);
+            }, 3000);
+        } catch (error) {
+            alert("Error al guardar. Verifica tu conexión.");
+        }
     };
 
     const handleDeleteEntry = async (id: string) => {
@@ -496,7 +533,19 @@ export default function App() {
         setShowExportMenu(false);
     };
 
-    // --- Render Views ---
+    // --- Render Logic ---
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex items-center justify-center">
+                <Loader2 className="animate-spin text-red-600" size={40} />
+            </div>
+        );
+    }
+
+    if (!currentUser) {
+        return <LoginScreen onLoginSuccess={() => {}} />;
+    }
 
     const renderEntryView = () => (
         <div className="max-w-xl mx-auto mt-10">
@@ -561,49 +610,7 @@ export default function App() {
                 )}
             </div>
             <div className="mt-8 text-center text-sm text-gray-400 dark:text-gray-500">
-                <p>Estás registrando como <span className="font-semibold text-gray-600 dark:text-gray-300">{currentUser.name}</span></p>
-            </div>
-        </div>
-    );
-
-    const renderCloudConfig = () => (
-        <div className="max-w-2xl mx-auto">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Conexión Online</h2>
-            <p className="text-gray-500 dark:text-gray-400 mb-8">
-                El estado de la conexión a la base de datos compartida.
-            </p>
-
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm">
-                {isCloudConnected ? (
-                    <div className="text-center space-y-6">
-                        <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto">
-                            <Cloud size={40} className="text-green-600 dark:text-green-400" />
-                        </div>
-                        <div>
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Sincronizado</h3>
-                            <p className="text-gray-500 dark:text-gray-400 mt-2">
-                                Estás conectado a la base de datos global de Ibspot. <br/>
-                                <span className="text-xs">Tus datos locales y usuarios creados se han fusionado con la nube.</span>
-                            </p>
-                        </div>
-                        <div className="flex gap-4 justify-center">
-                            <button 
-                                onClick={() => storage.syncLocalToCloud()}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center gap-2"
-                            >
-                                <UploadCloud size={18} /> Forzar Sincronización Manual
-                            </button>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="text-center py-8">
-                         <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <CloudOff size={40} className="text-red-600 dark:text-red-400" />
-                        </div>
-                        <h3 className="text-xl font-bold text-red-600 dark:text-red-400">Sin Conexión</h3>
-                        <p className="text-gray-500 mt-2">Verifica tu internet. La app funciona offline pero no sincronizará.</p>
-                    </div>
-                )}
+                <p>Sesión iniciada como <span className="font-semibold text-gray-600 dark:text-gray-300">{currentUser?.name}</span></p>
             </div>
         </div>
     );
@@ -835,9 +842,11 @@ export default function App() {
                                                     </div>
                                                 </td>
                                                 <td className="p-4 text-right">
-                                                    <button onClick={() => handleDeleteEntry(entry.id)} className="text-gray-400 hover:text-red-500 transition-colors p-2">
-                                                        <Trash2 size={18} />
-                                                    </button>
+                                                    {entry.userId === currentUser.id && (
+                                                        <button onClick={() => handleDeleteEntry(entry.id)} className="text-gray-400 hover:text-red-500 transition-colors p-2">
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );
@@ -856,70 +865,9 @@ export default function App() {
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Equipo</h2>
-                    <p className="text-gray-500 dark:text-gray-400">Gestiona los usuarios y accesos.</p>
+                    <p className="text-gray-500 dark:text-gray-400">Miembros activos en la plataforma.</p>
                 </div>
-                <button 
-                    onClick={() => {
-                        setEditingUser(null);
-                        setUserNameInput('');
-                        setCustomAvatar(null);
-                        setIsAddingUser(true);
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl hover:opacity-90 transition-opacity font-medium shadow-lg shadow-slate-200 dark:shadow-none"
-                >
-                    <PlusCircle size={18} />
-                    <span className="hidden sm:inline">Nuevo Usuario</span>
-                </button>
             </div>
-
-            {isAddingUser && (
-                <div className="mb-8 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-xl animate-fade-in-up">
-                    <h3 className="font-bold text-lg mb-4 text-gray-900 dark:text-white">{editingUser ? 'Editar Usuario' : 'Crear Nuevo Usuario'}</h3>
-                    <div className="flex flex-col sm:flex-row gap-6">
-                        <div className="flex flex-col items-center gap-3">
-                            <div className="relative group cursor-pointer">
-                                <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-100 border-2 border-dashed border-gray-300 hover:border-red-500 transition-colors flex items-center justify-center">
-                                    {customAvatar ? (
-                                        <img src={customAvatar} alt="Preview" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <Camera className="text-gray-400 group-hover:text-red-500" size={24} />
-                                    )}
-                                </div>
-                                <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
-                            </div>
-                            <span className="text-xs text-gray-400">Click para foto</span>
-                        </div>
-                        <div className="flex-1 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nombre Completo</label>
-                                <input 
-                                    type="text" 
-                                    value={userNameInput}
-                                    onChange={(e) => setUserNameInput(e.target.value)}
-                                    placeholder="Ej. Ana García"
-                                    className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:ring-2 focus:ring-red-500 outline-none dark:text-white"
-                                    autoFocus
-                                />
-                            </div>
-                            <div className="flex justify-end gap-3 pt-2">
-                                <button 
-                                    onClick={() => setIsAddingUser(false)}
-                                    className="px-4 py-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                                >
-                                    Cancelar
-                                </button>
-                                <button 
-                                    onClick={handleSaveUser}
-                                    disabled={!userNameInput.trim()}
-                                    className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 font-medium"
-                                >
-                                    {editingUser ? 'Guardar Cambios' : 'Crear Usuario'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {users.map(user => (
@@ -941,25 +889,26 @@ export default function App() {
                                     </div>
                                 </div>
                             </div>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={() => startEditUser(user)}
-                                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                    title="Editar"
-                                >
-                                    <Pencil size={18} />
-                                </button>
-                                <button 
-                                    onClick={() => handleToggleUserStatus(user.id, user.active)}
-                                    className={`p-2 rounded-lg transition-colors ${user.active ? 'text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20' : 'text-green-600 bg-green-50 hover:bg-green-100'}`}
-                                    title={user.active ? "Desactivar" : "Activar"}
-                                >
-                                    <Power size={18} />
-                                </button>
-                            </div>
                         </div>
                     </div>
                 ))}
+            </div>
+        </div>
+    );
+
+    const renderCloudConfig = () => (
+        <div className="max-w-2xl mx-auto">
+             <div className="text-center py-8">
+                 <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Cloud size={40} className="text-green-600 dark:text-green-400" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conexión Segura Establecida</h3>
+                <p className="text-gray-500 mt-2">
+                    Tu cuenta está sincronizada en tiempo real. Todos los datos que ingreses se guardarán automáticamente en tu cuenta.
+                </p>
+                <div className="mt-8">
+                    <p className="text-sm text-gray-400">ID de Sesión: <span className="font-mono">{currentUser.id}</span></p>
+                </div>
             </div>
         </div>
     );
@@ -971,7 +920,6 @@ export default function App() {
                 <div className="flex items-center gap-2">
                     <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">I</div>
                     <span className="font-bold text-lg tracking-tight">Ibspot</span>
-                    {isSyncing && <RefreshCw size={14} className="animate-spin text-gray-400 ml-1" />}
                 </div>
                 <div className="flex items-center gap-3">
                      <button onClick={toggleTheme} className="p-2 text-gray-500 dark:text-gray-400">
@@ -988,55 +936,42 @@ export default function App() {
                         <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-red-200 dark:shadow-none">I</div>
                         <div>
                             <h1 className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">Ibspot</h1>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">Productividad</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Tracker Pro</p>
                         </div>
                     </div>
 
                     <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-4 px-4">Menu</div>
+                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-4 px-4">Principal</div>
                         <SidebarItem icon={PlusCircle} label="Registrar" active={view === 'entry'} onClick={() => setView('entry')} />
                         <SidebarItem icon={LayoutDashboard} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
                         <SidebarItem icon={History} label="Historial" active={view === 'history'} onClick={() => setView('history')} />
                         
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">Administración</div>
+                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">Comunidad</div>
                         <SidebarItem icon={Users} label="Equipo" active={view === 'users'} onClick={() => setView('users')} />
                         <SidebarItem 
-                            icon={isCloudConnected ? Cloud : CloudOff} 
-                            label={isSyncing ? "Sincronizando..." : "Nube / Sync"}
+                            icon={Cloud} 
+                            label="Estado Nube"
                             active={view === 'cloud'} 
                             onClick={() => setView('cloud')} 
-                            extraClass={isCloudConnected ? "text-green-600 dark:text-green-400" : ""}
+                            extraClass="text-green-600 dark:text-green-400"
                         />
                     </nav>
 
                     <div className="p-4 border-t border-gray-100 dark:border-slate-700">
-                         <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3 flex items-center gap-3 mb-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors" title="Cambiar usuario">
-                            <img src={currentUser.avatar} alt={currentUser.name} className="w-10 h-10 rounded-full border border-white dark:border-slate-600" />
+                         <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3 flex items-center gap-3 mb-3" title="Usuario actual">
+                            <img src={currentUser.avatar} alt={currentUser.name} className="w-10 h-10 rounded-full border border-white dark:border-slate-600 object-cover" />
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{currentUser.name}</p>
-                                <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> {isSyncing ? 'Sincronizando...' : 'Online'}
-                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{currentUser.email}</p>
                             </div>
                         </div>
                         <div className="flex gap-2">
                              <button onClick={toggleTheme} className="flex-1 py-2 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
                                 {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
                             </button>
-                            {/* Simple User Switcher for demo purposes */}
-                             <div className="relative group flex-1">
-                                <button className="w-full py-2 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
-                                    <UserCog size={18} />
-                                </button>
-                                <div className="absolute bottom-full left-0 mb-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-gray-100 dark:border-slate-600 overflow-hidden hidden group-hover:block p-1">
-                                    <p className="px-3 py-2 text-xs font-bold text-gray-400 uppercase">Cambiar Usuario</p>
-                                    {users.filter(u => u.active && u.id !== currentUser.id).map(u => (
-                                        <button key={u.id} onClick={() => handleUserChange(u.id)} className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700 rounded-lg flex items-center gap-2">
-                                            <img src={u.avatar} className="w-5 h-5 rounded-full" /> {u.name}
-                                        </button>
-                                    ))}
-                                </div>
-                             </div>
+                            <button onClick={handleLogout} className="flex-1 py-2 flex items-center justify-center text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors" title="Cerrar Sesión">
+                                <LogOut size={18} />
+                            </button>
                         </div>
                     </div>
                 </aside>
@@ -1056,6 +991,7 @@ export default function App() {
                         <button onClick={() => setView('dashboard')} className={`p-2 rounded-xl ${view === 'dashboard' ? 'text-red-600 bg-red-50 dark:bg-red-900/20' : 'text-gray-400'}`}><LayoutDashboard size={24} /></button>
                         <button onClick={() => setView('entry')} className="p-4 bg-red-600 text-white rounded-full shadow-lg shadow-red-200 dark:shadow-none -mt-8 border-4 border-gray-50 dark:border-slate-900"><PlusCircle size={28} /></button>
                         <button onClick={() => setView('history')} className={`p-2 rounded-xl ${view === 'history' ? 'text-red-600 bg-red-50 dark:bg-red-900/20' : 'text-gray-400'}`}><History size={24} /></button>
+                         <button onClick={handleLogout} className={`p-2 rounded-xl text-gray-400`}><LogOut size={24} /></button>
                     </div>
                 </main>
             </div>

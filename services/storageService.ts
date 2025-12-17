@@ -3,24 +3,29 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { 
     getFirestore, 
     collection, 
-    addDoc, 
     onSnapshot, 
     query, 
     orderBy, 
     Firestore, 
     doc,
     setDoc,
-    getDocs,
-    updateDoc,
-    deleteDoc
+    deleteDoc,
+    getDoc
 } from 'firebase/firestore';
+import { 
+    getAuth, 
+    signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged, 
+    User as FirebaseUser,
+    Auth
+} from 'firebase/auth';
 
 const STORAGE_KEY_ENTRIES = 'ibspot_entries';
-const STORAGE_KEY_USER = 'ibspot_current_user_id';
 const STORAGE_KEY_USERS = 'ibspot_users_list';
-const STORAGE_KEY_FIREBASE_CONFIG = 'ibspot_firebase_config';
 
-// CONFIGURACIÓN COMPARTIDA (Hardcoded para acceso público inmediato)
+// CONFIGURACIÓN COMPARTIDA
 const SHARED_CONFIG: FirebaseConfig = {
   apiKey: "AIzaSyAUWszewP2GYwK-O3EsY_Jg1wb1jbD0uPM",
   authDomain: "ibspot-tracker.firebaseapp.com",
@@ -33,35 +38,19 @@ const SHARED_CONFIG: FirebaseConfig = {
 // Global Cloud State
 let firebaseApp: FirebaseApp | null = null;
 let db: Firestore | null = null;
+let auth: Auth | null = null;
 let isCloudEnabled = false;
 
 // --- Initialization ---
 
-export const getFirebaseConfig = (): FirebaseConfig | null => {
-    const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
-    return raw ? JSON.parse(raw) : SHARED_CONFIG;
-};
-
-export const saveFirebaseConfig = (config: FirebaseConfig) => {
-    localStorage.setItem(STORAGE_KEY_FIREBASE_CONFIG, JSON.stringify(config));
-    initializeCloud(config);
-};
-
-export const clearFirebaseConfig = () => {
-    localStorage.removeItem(STORAGE_KEY_FIREBASE_CONFIG);
-    firebaseApp = null;
-    db = null;
-    isCloudEnabled = false;
-    window.location.reload(); 
-};
-
-export const initializeCloud = (config: FirebaseConfig) => {
+export const initializeCloud = () => {
     try {
         if (!firebaseApp) {
-            firebaseApp = initializeApp(config);
+            firebaseApp = initializeApp(SHARED_CONFIG);
             db = getFirestore(firebaseApp);
+            auth = getAuth(firebaseApp);
             isCloudEnabled = true;
-            console.log("Ibspot Cloud Connected");
+            console.log("Ibspot Cloud & Auth Connected");
         }
     } catch (e) {
         console.error("Error connecting to cloud:", e);
@@ -69,14 +58,71 @@ export const initializeCloud = (config: FirebaseConfig) => {
     }
 };
 
-const configToLoad = getFirebaseConfig();
-if (configToLoad) {
-    initializeCloud(configToLoad);
-}
+// Auto-init on load
+initializeCloud();
 
 export const isOnline = () => isCloudEnabled;
 
-// --- Subscriptions (Real-time) ---
+// --- Authentication ---
+
+export const subscribeToAuth = (callback: (user: User | null) => void) => {
+    if (!auth) return () => {};
+    return onAuthStateChanged(auth, async (firebaseUser) => {
+        if (firebaseUser) {
+            // Get user profile from Firestore
+            if (db) {
+                const userDocRef = doc(db, "users", firebaseUser.uid);
+                const userDoc = await getDoc(userDocRef);
+                if (userDoc.exists()) {
+                    callback(userDoc.data() as User);
+                } else {
+                    // Fallback if auth exists but firestore doc doesn't (shouldn't happen with correct register flow)
+                    callback({
+                        id: firebaseUser.uid,
+                        name: firebaseUser.email?.split('@')[0] || 'Usuario',
+                        email: firebaseUser.email || '',
+                        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+                        active: true
+                    });
+                }
+            }
+        } else {
+            callback(null);
+        }
+    });
+};
+
+export const loginUser = async (email: string, pass: string) => {
+    if (!auth) throw new Error("No hay conexión");
+    await signInWithEmailAndPassword(auth, email, pass);
+};
+
+export const registerUser = async (email: string, pass: string, name: string, avatarDataUrl?: string) => {
+    if (!auth || !db) throw new Error("No hay conexión");
+    
+    // 1. Create Auth User
+    const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+    const uid = userCredential.user.uid;
+    
+    // 2. Create Firestore Profile
+    const newUser: User = {
+        id: uid,
+        name: name,
+        email: email,
+        avatar: avatarDataUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+        active: true
+    };
+    
+    await setDoc(doc(db, "users", uid), newUser);
+    return newUser;
+};
+
+export const logoutUser = async () => {
+    if (!auth) return;
+    await signOut(auth);
+};
+
+// --- Subscriptions (Real-time Data) ---
 
 export const subscribeToEntries = (callback: (entries: IsinEntry[]) => void) => {
     if (!isCloudEnabled || !db) return () => {};
@@ -110,28 +156,33 @@ export const subscribeToUsers = (callback: (users: User[]) => void) => {
     });
 };
 
-// --- Entries ---
+// --- Entries Operations ---
 
 export const saveEntry = async (entry: IsinEntry): Promise<void> => {
+    // 1. Save Local (Optimistic UI)
     const existing = getEntriesLocal();
     const updated = [entry, ...existing];
     localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
 
+    // 2. Save Cloud
     if (isCloudEnabled && db) {
         try {
             const { id, ...data } = entry;
             await setDoc(doc(db, "entries", id), data);
         } catch (e) {
             console.error("Error saving to cloud", e);
+            throw e; 
         }
     }
 };
 
 export const deleteEntry = async (id: string): Promise<void> => {
+    // 1. Local
     const existing = getEntriesLocal();
     const updated = existing.filter(e => e.id !== id);
     localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
 
+    // 2. Cloud
     if (isCloudEnabled && db) {
         try {
             await deleteDoc(doc(db, "entries", id));
@@ -140,6 +191,8 @@ export const deleteEntry = async (id: string): Promise<void> => {
         }
     }
 };
+
+// --- Local Helpers ---
 
 const getEntriesLocal = (): IsinEntry[] => {
     const raw = localStorage.getItem(STORAGE_KEY_ENTRIES);
@@ -155,87 +208,17 @@ export const getEntries = (): IsinEntry[] => {
     return getEntriesLocal();
 };
 
-// --- Users ---
-
 export const getUsers = (): User[] => {
     const raw = localStorage.getItem(STORAGE_KEY_USERS);
-    if (!raw) {
-        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(DEFAULT_USERS));
-        return DEFAULT_USERS;
-    }
+    if (!raw) return DEFAULT_USERS;
     try {
-        const parsed = JSON.parse(raw);
-        return parsed.map((u: any) => ({
-            ...u,
-            active: u.active !== undefined ? u.active : true
-        }));
+        return JSON.parse(raw);
     } catch (e) {
         return DEFAULT_USERS;
     }
 };
 
-export const saveUsers = async (users: User[]): Promise<void> => {
-    localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
-
-    if (isCloudEnabled && db) {
-        try {
-            for (const user of users) {
-                await setDoc(doc(db, "users", user.id), user);
-            }
-        } catch (e) {
-            console.error("Error syncing users to cloud", e);
-        }
-    }
-};
-
-export const getCurrentUser = (): User => {
-    const users = getUsers();
-    const id = localStorage.getItem(STORAGE_KEY_USER);
-    const user = users.find(u => u.id === id);
-    const firstActive = users.find(u => u.active) || users[0];
-    return user || firstActive;
-};
-
-export const setCurrentUser = (userId: string): void => {
-    localStorage.setItem(STORAGE_KEY_USER, userId);
-};
-
-export const clearData = (): void => {
-    localStorage.removeItem(STORAGE_KEY_ENTRIES);
-}
-
-// --- Migration Tool ---
 export const syncLocalToCloud = async (silent: boolean = false) => {
-    if (!isCloudEnabled || !db) return;
-
-    const localEntries = getEntriesLocal();
-    const localUsers = getUsers();
-
-    try {
-        console.log("Iniciando auto-sincronización...");
-        // Sync Users
-        for (const user of localUsers) {
-            await setDoc(doc(db, "users", user.id), user);
-        }
-        // Sync Entries
-        // Upload recent ones first
-        const entryBatch = localEntries.slice(0, 500); 
-        for (const entry of entryBatch) {
-            await setDoc(doc(db, "entries", entry.id), {
-                isin: entry.isin,
-                userId: entry.userId,
-                timestamp: entry.timestamp,
-                dateStr: entry.dateStr
-            });
-        }
-        console.log("Auto-sincronización completada.");
-        if (!silent) {
-            alert("Sincronización completada: Datos locales subidos a la nube.");
-        }
-    } catch (e) {
-        console.error("Sync error", e);
-        if (!silent) {
-            alert("Hubo un error al subir los datos locales.");
-        }
-    }
+    // Deprecated for data, but kept for legacy cleanups if needed.
+    // With Auth, we trust Firestore as source of truth.
 };
