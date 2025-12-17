@@ -20,6 +20,16 @@ const STORAGE_KEY_USER = 'ibspot_current_user_id';
 const STORAGE_KEY_USERS = 'ibspot_users_list';
 const STORAGE_KEY_FIREBASE_CONFIG = 'ibspot_firebase_config';
 
+// CONFIGURACIÓN COMPARTIDA (Hardcoded para acceso público inmediato)
+const SHARED_CONFIG: FirebaseConfig = {
+  apiKey: "AIzaSyAUWszewP2GYwK-O3EsY_Jg1wb1jbD0uPM",
+  authDomain: "ibspot-tracker.firebaseapp.com",
+  projectId: "ibspot-tracker",
+  storageBucket: "ibspot-tracker.firebasestorage.app",
+  messagingSenderId: "127138134154",
+  appId: "1:127138134154:web:0be3ed1cf2b03474fe9573"
+};
+
 // Global Cloud State
 let firebaseApp: FirebaseApp | null = null;
 let db: Firestore | null = null;
@@ -28,8 +38,9 @@ let isCloudEnabled = false;
 // --- Initialization ---
 
 export const getFirebaseConfig = (): FirebaseConfig | null => {
+    // Primero intenta leer configuración manual local, si no, usa la compartida
     const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? JSON.parse(raw) : SHARED_CONFIG;
 };
 
 export const saveFirebaseConfig = (config: FirebaseConfig) => {
@@ -38,11 +49,12 @@ export const saveFirebaseConfig = (config: FirebaseConfig) => {
 };
 
 export const clearFirebaseConfig = () => {
+    // Al borrar la config, recaerá en la SHARED_CONFIG en la próxima recarga
     localStorage.removeItem(STORAGE_KEY_FIREBASE_CONFIG);
     firebaseApp = null;
     db = null;
     isCloudEnabled = false;
-    window.location.reload(); // Force reset
+    window.location.reload(); 
 };
 
 export const initializeCloud = (config: FirebaseConfig) => {
@@ -55,14 +67,15 @@ export const initializeCloud = (config: FirebaseConfig) => {
         }
     } catch (e) {
         console.error("Error connecting to cloud:", e);
+        // Si falla la compartida, no marcamos cloud como enabled
         isCloudEnabled = false;
     }
 };
 
-// Auto-init on load if config exists
-const storedConfig = getFirebaseConfig();
-if (storedConfig) {
-    initializeCloud(storedConfig);
+// Auto-init on load
+const configToLoad = getFirebaseConfig();
+if (configToLoad) {
+    initializeCloud(configToLoad);
 }
 
 export const isOnline = () => isCloudEnabled;
@@ -113,11 +126,7 @@ export const saveEntry = async (entry: IsinEntry): Promise<void> => {
     // 2. Save Cloud if enabled
     if (isCloudEnabled && db) {
         try {
-            // Remove ID to let Firestore generate one or use the one we created
             const { id, ...data } = entry;
-            // Use setDoc if we want to preserve our UUID, or addDoc for auto ID
-            // Here we prefer preserving our frontend ID for consistency if needed, 
-            // but addDoc is safer for pure cloud. Let's use setDoc with our ID.
             await setDoc(doc(db, "entries", id), data);
         } catch (e) {
             console.error("Error saving to cloud", e);
@@ -182,8 +191,6 @@ export const saveUsers = async (users: User[]): Promise<void> => {
     // Cloud
     if (isCloudEnabled && db) {
         try {
-            // Batch update or individual? For simplicity, we loop.
-            // In a real app, use batch().
             for (const user of users) {
                 await setDoc(doc(db, "users", user.id), user);
             }
@@ -210,7 +217,6 @@ export const clearData = (): void => {
 }
 
 // --- Migration Tool ---
-// Helper to push local data to cloud when first connecting
 export const syncLocalToCloud = async () => {
     if (!isCloudEnabled || !db) return;
 
@@ -223,10 +229,8 @@ export const syncLocalToCloud = async () => {
             await setDoc(doc(db, "users", user.id), user);
         }
         // Sync Entries
-        const entryBatch = localEntries.slice(0, 500); // Safety limit for batch
+        const entryBatch = localEntries.slice(0, 500); 
         for (const entry of entryBatch) {
-            // Check if exists first to avoid overwrite? 
-            // For simplicity, we assume if we are initing cloud, cloud might be empty or we overwrite.
             await setDoc(doc(db, "entries", entry.id), {
                 isin: entry.isin,
                 userId: entry.userId,
