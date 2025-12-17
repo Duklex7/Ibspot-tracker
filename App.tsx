@@ -479,9 +479,16 @@ export default function App() {
                 input = input.slice(0, -1).trim();
             }
 
-            // Relaxed JSON parsing
+            // Clean comments
+            input = input.replace(/\/\/.*$/gm, '');
+
+            // NEW: If it doesn't start with curly brace, wrap it
+            if (!input.trim().startsWith('{')) {
+                input = `{${input}}`;
+            }
+
+            // Relaxed JSON parsing regex
             const jsonLike = input
-                .replace(/\/\/.*$/gm, '') // Remove comments
                 .replace(/(\w+)\s*:/g, '"$1":') // Quote keys
                 .replace(/'/g, '"') // Replace single quotes with double quotes
                 .replace(/,(\s*})/g, '$1'); // Remove trailing commas
@@ -500,7 +507,7 @@ export default function App() {
             window.location.reload(); 
         } catch (e) {
             console.error(e);
-            alert("Error al interpretar el código. \n\nIntenta copiar SOLO lo que está entre las llaves { ... }, o asegúrate de que el formato sea correcto.");
+            alert("Error al interpretar el código. \n\nAsegúrate de haber copiado la configuración completa.");
         }
     };
 
