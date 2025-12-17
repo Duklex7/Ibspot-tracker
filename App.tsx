@@ -41,7 +41,10 @@ import {
     Lock,
     User as UserIcon,
     Loader2,
-    Edit3
+    Edit3,
+    Shield,
+    ShieldCheck,
+    Ban
 } from 'lucide-react';
 import { ActivityChart, ComparisonChart } from './components/DashboardCharts';
 import { User, IsinEntry, TimeFrame } from './types';
@@ -94,6 +97,8 @@ const GoogleIcon = () => (
 const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () => void, onSave: (u: Partial<User>) => void }) => {
     const [name, setName] = useState(user.name);
     const [avatar, setAvatar] = useState(user.avatar);
+    const [adminCode, setAdminCode] = useState('');
+    const [showAdminInput, setShowAdminInput] = useState(false);
 
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -104,11 +109,20 @@ const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () =
         }
     };
 
+    const handleSave = () => {
+        const updates: Partial<User> = { name, avatar };
+        if (adminCode === 'ADMIN-IBSPOT') {
+            updates.role = 'admin';
+            alert("¡Privilegios de Administrador Activados!");
+        }
+        onSave(updates);
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm p-6 border border-gray-100 dark:border-slate-700">
+            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm p-6 border border-gray-100 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-bold dark:text-white">Editar Perfil</h3>
+                    <h3 className="text-xl font-bold dark:text-white">Editar Perfil: {user.name}</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20}/></button>
                 </div>
                 
@@ -134,11 +148,38 @@ const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () =
                             className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
                         />
                     </div>
+                    
+                    {user.role === 'admin' ? (
+                        <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl border border-green-100 dark:border-green-900 flex items-center gap-2 text-green-700 dark:text-green-400">
+                            <ShieldCheck size={18} />
+                            <span className="text-sm font-medium">Es Administrador</span>
+                        </div>
+                    ) : (
+                        <div>
+                             <button 
+                                type="button" 
+                                onClick={() => setShowAdminInput(!showAdminInput)}
+                                className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 mt-2"
+                            >
+                                <Shield size={12} />
+                                {showAdminInput ? 'Cancelar' : 'Tengo un código de Admin'}
+                            </button>
+                            {showAdminInput && (
+                                <input 
+                                    type="password"
+                                    placeholder="Código Admin"
+                                    value={adminCode}
+                                    onChange={(e) => setAdminCode(e.target.value)}
+                                    className="w-full mt-2 p-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 text-sm focus:ring-2 focus:ring-red-500 dark:text-white"
+                                />
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-8 flex gap-3">
                     <button onClick={onClose} className="flex-1 py-3 text-gray-500 font-medium hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl transition-colors">Cancelar</button>
-                    <button onClick={() => onSave({ name, avatar })} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg hover:bg-red-700 transition-colors">Guardar</button>
+                    <button onClick={handleSave} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg hover:bg-red-700 transition-colors">Guardar</button>
                 </div>
             </div>
         </div>
@@ -147,6 +188,7 @@ const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () =
 
 const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
     const [isRegistering, setIsRegistering] = useState(false);
+    const [showManualGoogle, setShowManualGoogle] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
@@ -175,15 +217,30 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
             onLoginSuccess();
         } catch (err: any) {
             console.error("Login Error:", err);
-            if (err.code === 'auth/popup-closed-by-user') {
+            // Handle Domain Restrictions for Offline/Demo Mode
+            if (err.code === 'auth/unauthorized-domain' || err.code === 'auth/operation-not-allowed' || err.code === 'auth/offline-mode-simulation') {
+                setShowManualGoogle(true);
+                setError(null);
+            } else if (err.code === 'auth/popup-closed-by-user') {
                 setError("Inicio de sesión cancelado.");
-            } else if (err.code === 'auth/unauthorized-domain') {
-                // This shouldn't be reached if storageService handles it, 
-                // but as a fallback:
-                setError("Dominio no autorizado. Verifica la consola de Firebase.");
             } else {
                 setError(`Error de Google: ${err.message || 'Desconocido'}`);
             }
+            setLoading(false);
+        }
+    };
+
+    const handleManualGoogleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!email.trim()) return;
+        setLoading(true);
+        try {
+            // "Register" via local storage simulation with their specific email
+            await storage.loginWithGoogleManual(email, name, avatar || undefined);
+            onLoginSuccess();
+        } catch (e) {
+            setError("Error al guardar datos locales.");
+        } finally {
             setLoading(false);
         }
     };
@@ -217,6 +274,67 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
             setLoading(false);
         }
     };
+
+    if (showManualGoogle) {
+        return (
+            <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex items-center justify-center p-4">
+                <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-8 border border-gray-100 dark:border-slate-700 animate-fade-in">
+                    <div className="text-center mb-6">
+                        <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center font-bold text-3xl mx-auto mb-4">
+                            <CloudOff size={32} />
+                        </div>
+                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Modo Offline Detectado</h1>
+                        <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm">
+                            El dominio no está autorizado en Firebase o no hay conexión. 
+                            Ingresa tu correo de Google manualmente para usar tu identidad real.
+                        </p>
+                    </div>
+
+                    <form onSubmit={handleManualGoogleSubmit} className="space-y-4">
+                         <div className="flex justify-center mb-6">
+                            <div className="relative group cursor-pointer">
+                                <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-100 dark:bg-slate-700 border-2 border-dashed border-gray-300 dark:border-slate-600 flex items-center justify-center">
+                                    {avatar ? <img src={avatar} className="w-full h-full object-cover" /> : <Camera className="text-gray-400" size={24} />}
+                                </div>
+                                <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
+                            </div>
+                        </div>
+
+                        <input 
+                            type="email" 
+                            placeholder="Tu correo de Google (ej: alexander@gmail.com)"
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                            required
+                        />
+                         <input 
+                            type="text" 
+                            placeholder="Tu nombre (ej: Alexander)"
+                            value={name}
+                            onChange={e => setName(e.target.value)}
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                            required
+                        />
+                        <button 
+                            type="submit" 
+                            disabled={loading}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2"
+                        >
+                            {loading ? <Loader2 className="animate-spin" /> : 'Confirmar Identidad'}
+                        </button>
+                        <button 
+                            type="button" 
+                            onClick={() => setShowManualGoogle(false)}
+                            className="w-full text-gray-500 dark:text-gray-400 py-2 text-sm hover:underline"
+                        >
+                            Volver
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex items-center justify-center p-4">
@@ -388,13 +506,14 @@ const StatCard = ({ label, value, subtext, icon: Icon, highlight = false, toolti
 // --- Main App ---
 
 export default function App() {
-    const [view, setView] = useState<'dashboard' | 'entry' | 'history' | 'users' | 'cloud'>('entry');
+    const [view, setView] = useState<'dashboard' | 'entry' | 'history' | 'users' | 'cloud' | 'admin'>('entry');
     const [entries, setEntries] = useState<IsinEntry[]>([]);
     const [users, setUsers] = useState<User[]>([]);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [authLoading, setAuthLoading] = useState(true);
     const [timeFrame, setTimeFrame] = useState<TimeFrame>('day');
     const [showProfileModal, setShowProfileModal] = useState(false);
+    const [editingTarget, setEditingTarget] = useState<User | null>(null);
     
     // Cloud Config State
     const [isCloudConnected, setIsCloudConnected] = useState(false);
@@ -473,11 +592,21 @@ export default function App() {
         }
     };
 
-    const handleUpdateProfile = (updates: Partial<User>) => {
-        if (currentUser) {
+    const handleSaveProfile = (updates: Partial<User>) => {
+        if (editingTarget) {
+            // Admin editing someone else (or themselves via admin panel)
+            storage.adminUpdateUser(editingTarget.id, updates);
+            setEditingTarget(null);
+        } else if (currentUser) {
+            // User editing themselves via sidebar
             storage.updateUserProfile(currentUser.id, updates);
-            setShowProfileModal(false);
         }
+        setShowProfileModal(false);
+    };
+
+    const openEditModal = (user: User) => {
+        setEditingTarget(user);
+        setShowProfileModal(true);
     };
 
     const filteredEntries = useMemo(() => {
@@ -1032,20 +1161,102 @@ export default function App() {
         </div>
     );
 
+    const renderAdminPanel = () => {
+        if (currentUser.role !== 'admin') return <div className="text-center p-10 text-red-500">Acceso Denegado</div>;
+
+        return (
+            <div className="max-w-6xl mx-auto space-y-6">
+                <div>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <ShieldCheck className="text-red-600" /> Administración
+                    </h2>
+                    <p className="text-gray-500 dark:text-gray-400">Gestión de usuarios y permisos.</p>
+                </div>
+
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/30">
+                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Usuario</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Email</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Rol</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Estado</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase text-right">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 dark:divide-slate-700">
+                            {users.map(user => (
+                                <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                                    <td className="p-4">
+                                        <div className="flex items-center gap-3">
+                                            <img src={user.avatar} className="w-10 h-10 rounded-full bg-gray-200 object-cover" />
+                                            <span className="font-medium text-gray-900 dark:text-white">{user.name}</span>
+                                        </div>
+                                    </td>
+                                    <td className="p-4 text-sm text-gray-500 dark:text-gray-400">{user.email}</td>
+                                    <td className="p-4">
+                                        <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                                            {user.role || 'user'}
+                                        </span>
+                                    </td>
+                                    <td className="p-4">
+                                        <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${user.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                            {user.active ? 'Activo' : 'Inactivo'}
+                                        </span>
+                                    </td>
+                                    <td className="p-4 text-right space-x-2">
+                                        <button 
+                                            onClick={() => openEditModal(user)}
+                                            className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
+                                            title="Editar Usuario"
+                                        >
+                                            <Edit3 size={18} />
+                                        </button>
+                                        <button 
+                                            onClick={() => storage.adminToggleUserStatus(user.id, !user.active)}
+                                            className="p-2 text-gray-400 hover:text-orange-500 transition-colors"
+                                            title={user.active ? "Desactivar" : "Activar"}
+                                        >
+                                            <Ban size={18} />
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                if(confirm(`¿Eliminar usuario ${user.name} permanentemente?`)) {
+                                                    storage.adminDeleteUser(user.id);
+                                                }
+                                            }}
+                                            className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                                            title="Eliminar"
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white font-sans transition-colors duration-200">
             {/* Modal */}
-            {showProfileModal && currentUser && (
+            {showProfileModal && (currentUser || editingTarget) && (
                 <EditProfileModal 
-                    user={currentUser} 
-                    onClose={() => setShowProfileModal(false)} 
-                    onSave={handleUpdateProfile} 
+                    user={editingTarget || currentUser!} 
+                    onClose={() => {
+                        setShowProfileModal(false);
+                        setEditingTarget(null);
+                    }} 
+                    onSave={handleSaveProfile} 
                 />
             )}
 
             {/* Mobile Header */}
             <header className="md:hidden bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 p-4 flex items-center justify-between sticky top-0 z-20">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('dashboard')}>
                     <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">I</div>
                     <span className="font-bold text-lg tracking-tight">Ibspot</span>
                 </div>
@@ -1062,7 +1273,7 @@ export default function App() {
             <div className="flex h-screen overflow-hidden">
                 {/* Desktop Sidebar */}
                 <aside className="hidden md:flex w-64 flex-col bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 z-10">
-                    <div className="p-6 flex items-center gap-3">
+                    <div className="p-6 flex items-center gap-3 cursor-pointer" onClick={() => setView('dashboard')}>
                         <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-red-200 dark:shadow-none">I</div>
                         <div>
                             <h1 className="font-bold text-xl tracking-tight text-gray-900 dark:text-white">Ibspot</h1>
@@ -1078,6 +1289,14 @@ export default function App() {
                         
                         <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">Comunidad</div>
                         <SidebarItem icon={Users} label="Equipo" active={view === 'users'} onClick={() => setView('users')} />
+                        
+                        {currentUser.role === 'admin' && (
+                            <>
+                                <div className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2 mt-8 px-4">Admin</div>
+                                <SidebarItem icon={ShieldCheck} label="Panel Admin" active={view === 'admin'} onClick={() => setView('admin')} extraClass="text-red-600 dark:text-red-400" />
+                            </>
+                        )}
+
                         <SidebarItem 
                             icon={isCloudConnected ? Cloud : CloudOff} 
                             label={isCloudConnected ? "Estado Nube" : "Modo Local"}
@@ -1120,6 +1339,7 @@ export default function App() {
                         {view === 'dashboard' && renderDashboard()}
                         {view === 'history' && renderHistory()}
                         {view === 'users' && renderUsers()}
+                        {view === 'admin' && renderAdminPanel()}
                         {view === 'cloud' && renderCloudConfig()}
                     </div>
                     

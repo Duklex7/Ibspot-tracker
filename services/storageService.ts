@@ -52,8 +52,6 @@ export const initializeCloud = () => {
     try {
         if (!firebaseApp) {
             firebaseApp = initializeApp(SHARED_CONFIG);
-            
-            // Try initializing services individually to catch specific errors
             try {
                 db = getFirestore(firebaseApp);
                 auth = getAuth(firebaseApp);
@@ -70,7 +68,6 @@ export const initializeCloud = () => {
     }
 };
 
-// Auto-init on load
 initializeCloud();
 
 export const isOnline = () => isCloudEnabled;
@@ -103,7 +100,7 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
     const localListener = () => {
         const u = getLocalUser();
         if (u) callback(u);
-        else if (!auth) callback(null); // Clear if no auth service
+        else if (!auth) callback(null); 
     };
     window.addEventListener('ibspot_auth_change', localListener);
 
@@ -112,7 +109,6 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
     if (auth) {
         unsubFirebase = onAuthStateChanged(auth, async (firebaseUser) => {
             if (firebaseUser) {
-                // Firebase Login Success
                 if (db) {
                     try {
                         const userDocRef = doc(db, "users", firebaseUser.uid);
@@ -120,47 +116,45 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
                         if (userDoc.exists()) {
                             callback(userDoc.data() as User);
                         } else {
-                            // Auto-repair
                             const newUser: User = {
                                 id: firebaseUser.uid,
                                 name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
                                 email: firebaseUser.email || '',
                                 avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-                                active: true
+                                active: true,
+                                role: 'user'
                             };
                             setDoc(userDocRef, newUser).catch(console.error);
                             callback(newUser);
                         }
                     } catch (e) {
-                        // DB Error -> Use basic auth info
                          const fallbackUser: User = {
                             id: firebaseUser.uid,
                             name: firebaseUser.displayName || 'Usuario',
                             email: firebaseUser.email || '',
                             avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-                            active: true
+                            active: true,
+                            role: 'user'
                         };
                         callback(fallbackUser);
                     }
                 } else {
-                     // Auth only (no DB)
                      const fallbackUser: User = {
                         id: firebaseUser.uid,
                         name: firebaseUser.displayName || 'Usuario',
                         email: firebaseUser.email || '',
                         avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-                        active: true
+                        active: true,
+                        role: 'user'
                     };
                     callback(fallbackUser);
                 }
             } else {
-                // Firebase Logout -> Check local again (or null)
                 const u = getLocalUser();
                 callback(u); 
             }
         });
     } else {
-        // If Auth is not initialized, we rely solely on local user
         if (!localUser) callback(null);
     }
 
@@ -176,58 +170,36 @@ export const loginUser = async (email: string, pass: string) => {
             await signInWithEmailAndPassword(auth, email, pass);
             return;
         } catch (e) {
-            // Only fall back if it's a connection error, not bad password
             console.error("Firebase login failed:", e);
             throw e; 
         }
     }
     
-    // Offline Mode Login Logic
-    // 1. Check if user already exists in our local list
+    // Offline Mode Login Logic - STRICT EMAIL MATCHING
     const localUsers = getUsersLocal();
     const existingUser = localUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
 
     if (existingUser) {
         setLocalUser(existingUser);
     } else {
-        // 2. Create new if not found
+        // Create new based on INPUT email, not random
         const mockUser: User = {
             id: 'local-' + Date.now(),
             name: email.split('@')[0],
-            email: email,
+            email: email, // Use actual email
             avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`,
-            active: true
+            active: true,
+            role: 'user'
         };
-        // Add to the public list so they appear on leaderboards immediately
         const updatedUsers = [...localUsers, mockUser];
         localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
-        
         setLocalUser(mockUser);
     }
 };
 
 export const loginWithGoogle = async () => {
     if (!auth) {
-         // Force Offline Mode with "Smart" Check
-         const email = 'google@local.com';
-         const localUsers = getUsersLocal();
-         const existingUser = localUsers.find(u => u.email === email);
-
-         if (existingUser) {
-             setLocalUser(existingUser);
-         } else {
-            const mockUser: User = {
-                id: 'google-local-' + Date.now(),
-                name: 'Usuario Google (Local)',
-                email: email,
-                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=Google`,
-                active: true
-            };
-            const updatedUsers = [...localUsers, mockUser];
-            localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
-            setLocalUser(mockUser);
-         }
-        return;
+         throw { code: 'auth/offline-mode-simulation' };
     }
 
     const provider = new GoogleAuthProvider();
@@ -247,44 +219,51 @@ export const loginWithGoogle = async () => {
                     name: user.displayName || "Usuario Google",
                     email: user.email || "",
                     avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-                    active: true
+                    active: true,
+                    role: 'user'
                 };
                 await setDoc(userDocRef, newUser);
             }
         }
     } catch (error: any) {
-        console.error("Google Login Error", error);
-        
         if (error.code === 'auth/unauthorized-domain' || error.code === 'auth/operation-not-allowed') {
-            console.warn("Domain not authorized in Firebase. Switching to Local Demo Mode.");
-            
-            // Fallback Logic
-            const email = 'demo@ibspot.local';
-            const localUsers = getUsersLocal();
-            const existingUser = localUsers.find(u => u.email === email);
-            
-            if (existingUser) {
-                setLocalUser(existingUser);
-            } else {
-                const mockUser: User = {
-                    id: 'google-local-fallback',
-                    name: 'Usuario Demo (Local)',
-                    email: email,
-                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=Demo`,
-                    active: true
-                };
-                const updatedUsers = [...localUsers, mockUser];
-                localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
-                setLocalUser(mockUser);
-            }
-            return;
+            throw error;
         }
         throw error;
     }
 };
 
+// Function for Manual Google Login Form (Offline/Domain restricted)
+export const loginWithGoogleManual = async (email: string, name: string, avatarUrl?: string) => {
+    const localUsers = getUsersLocal();
+    const existingUser = localUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+    if (existingUser) {
+        // Update existing user with new details if provided
+        if (name && existingUser.name !== name) existingUser.name = name;
+        if (avatarUrl && existingUser.avatar !== avatarUrl) existingUser.avatar = avatarUrl;
+        
+        const updatedList = localUsers.map(u => u.id === existingUser.id ? existingUser : u);
+        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedList));
+        
+        setLocalUser(existingUser);
+    } else {
+        // Create specific local user matching Google details
+        const newUser: User = {
+            id: 'google-manual-' + Date.now(),
+            name: name || email.split('@')[0],
+            email: email,
+            avatar: avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`,
+            active: true,
+            role: 'user'
+        };
+        const updatedUsers = [...localUsers, newUser];
+        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
+        setLocalUser(newUser);
+    }
+};
+
 export const registerUser = async (email: string, pass: string, name: string, avatarDataUrl?: string) => {
-    // Try Cloud Registration
     if (auth) {
         try {
             const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
@@ -295,7 +274,8 @@ export const registerUser = async (email: string, pass: string, name: string, av
                 name: name,
                 email: email,
                 avatar: avatarDataUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
-                active: true
+                active: true,
+                role: 'user'
             };
             
             if (db) {
@@ -311,15 +291,14 @@ export const registerUser = async (email: string, pass: string, name: string, av
             throw e;
         }
     } else {
-        // Cloud unavailable -> Local Registration
         const newUser: User = {
             id: 'local-' + Date.now(),
             name: name,
             email: email,
             avatar: avatarDataUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
-            active: true
+            active: true,
+            role: 'user'
         };
-        // Update global list
         const localUsers = getUsersLocal();
         localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify([...localUsers, newUser]));
         
@@ -336,7 +315,7 @@ export const updateUserProfile = async (userId: string, updates: Partial<User>) 
         setLocalUser(updated);
     }
 
-    // 2. Update Local Global List (so leaderboards update)
+    // 2. Update Local Global List
     const localUsers = getUsersLocal();
     const updatedUsers = localUsers.map(u => u.id === userId ? { ...u, ...updates } : u);
     localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
@@ -345,7 +324,6 @@ export const updateUserProfile = async (userId: string, updates: Partial<User>) 
     if (isCloudEnabled && db && auth && auth.currentUser) {
         try {
             await updateDoc(doc(db, "users", userId), updates);
-            // Also update Auth profile if name changed
             if (updates.name) {
                 await updateProfile(auth.currentUser, { displayName: updates.name });
             }
@@ -353,6 +331,38 @@ export const updateUserProfile = async (userId: string, updates: Partial<User>) 
             console.error("Error updating cloud profile:", e);
         }
     }
+};
+
+// --- ADMIN FUNCTIONS ---
+
+export const adminDeleteUser = async (userId: string) => {
+    // 1. Local
+    const localUsers = getUsersLocal();
+    const updatedUsers = localUsers.filter(u => u.id !== userId);
+    localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
+    
+    // Check if we deleted the current user
+    const currentUser = getLocalUser();
+    if (currentUser && currentUser.id === userId) {
+        setLocalUser(null);
+    }
+
+    // 2. Cloud
+    if (isCloudEnabled && db) {
+        try {
+            await deleteDoc(doc(db, "users", userId));
+        } catch (e) {
+            console.error("Cloud delete user failed", e);
+        }
+    }
+};
+
+export const adminToggleUserStatus = async (userId: string, active: boolean) => {
+    await updateUserProfile(userId, { active });
+};
+
+export const adminUpdateUser = async (userId: string, data: Partial<User>) => {
+    await updateUserProfile(userId, data);
 };
 
 export const logoutUser = async () => {
@@ -363,7 +373,6 @@ export const logoutUser = async () => {
 // --- Subscriptions (Real-time Data) ---
 
 export const subscribeToEntries = (callback: (entries: IsinEntry[]) => void) => {
-    // Always load local data first
     const localEntries = getEntriesLocal();
     callback(localEntries);
 
@@ -374,7 +383,6 @@ export const subscribeToEntries = (callback: (entries: IsinEntry[]) => void) => 
             snapshot.forEach((doc) => {
                 entries.push({ ...doc.data(), id: doc.id } as IsinEntry);
             });
-            // Update local storage to keep sync
             localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(entries));
             callback(entries);
         }, (error) => {
@@ -409,12 +417,10 @@ export const subscribeToUsers = (callback: (users: User[]) => void) => {
 // --- Entries Operations ---
 
 export const saveEntry = async (entry: IsinEntry): Promise<void> => {
-    // 1. Save Local (Always works)
     const existing = getEntriesLocal();
     const updated = [entry, ...existing];
     localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
 
-    // 2. Save Cloud (If available)
     if (isCloudEnabled && db) {
         try {
             const { id, ...data } = entry;
@@ -426,12 +432,10 @@ export const saveEntry = async (entry: IsinEntry): Promise<void> => {
 };
 
 export const deleteEntry = async (id: string): Promise<void> => {
-    // 1. Local
     const existing = getEntriesLocal();
     const updated = existing.filter(e => e.id !== id);
     localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
 
-    // 2. Cloud
     if (isCloudEnabled && db) {
         try {
             await deleteDoc(doc(db, "entries", id));
@@ -472,5 +476,4 @@ export const getUsers = (): User[] => {
 };
 
 export const syncLocalToCloud = async (silent: boolean = false) => {
-    // Sync logic not strictly required for this robust fallback version
 };
