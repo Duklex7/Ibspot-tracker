@@ -1,26 +1,142 @@
-import { IsinEntry, User, DEFAULT_USERS } from '../types';
+import { IsinEntry, User, DEFAULT_USERS, FirebaseConfig } from '../types';
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { 
+    getFirestore, 
+    collection, 
+    addDoc, 
+    onSnapshot, 
+    query, 
+    orderBy, 
+    Firestore, 
+    doc,
+    setDoc,
+    getDocs,
+    updateDoc
+} from 'firebase/firestore';
 
 const STORAGE_KEY_ENTRIES = 'ibspot_entries';
 const STORAGE_KEY_USER = 'ibspot_current_user_id';
 const STORAGE_KEY_USERS = 'ibspot_users_list';
+const STORAGE_KEY_FIREBASE_CONFIG = 'ibspot_firebase_config';
+
+// Global Cloud State
+let firebaseApp: FirebaseApp | null = null;
+let db: Firestore | null = null;
+let isCloudEnabled = false;
+
+// --- Initialization ---
+
+export const getFirebaseConfig = (): FirebaseConfig | null => {
+    const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
+    return raw ? JSON.parse(raw) : null;
+};
+
+export const saveFirebaseConfig = (config: FirebaseConfig) => {
+    localStorage.setItem(STORAGE_KEY_FIREBASE_CONFIG, JSON.stringify(config));
+    initializeCloud(config);
+};
+
+export const clearFirebaseConfig = () => {
+    localStorage.removeItem(STORAGE_KEY_FIREBASE_CONFIG);
+    firebaseApp = null;
+    db = null;
+    isCloudEnabled = false;
+    window.location.reload(); // Force reset
+};
+
+export const initializeCloud = (config: FirebaseConfig) => {
+    try {
+        if (!firebaseApp) {
+            firebaseApp = initializeApp(config);
+            db = getFirestore(firebaseApp);
+            isCloudEnabled = true;
+            console.log("Ibspot Cloud Connected");
+        }
+    } catch (e) {
+        console.error("Error connecting to cloud:", e);
+        isCloudEnabled = false;
+    }
+};
+
+// Auto-init on load if config exists
+const storedConfig = getFirebaseConfig();
+if (storedConfig) {
+    initializeCloud(storedConfig);
+}
+
+export const isOnline = () => isCloudEnabled;
+
+// --- Subscriptions (Real-time) ---
+
+export const subscribeToEntries = (callback: (entries: IsinEntry[]) => void) => {
+    if (!isCloudEnabled || !db) return () => {};
+
+    const q = query(collection(db, "entries"), orderBy("timestamp", "desc"));
+    return onSnapshot(q, (snapshot) => {
+        const entries: IsinEntry[] = [];
+        snapshot.forEach((doc) => {
+            entries.push({ ...doc.data(), id: doc.id } as IsinEntry);
+        });
+        // Cache for offline viewing
+        localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(entries));
+        callback(entries);
+    }, (error) => {
+        console.error("Cloud Sync Error:", error);
+    });
+};
+
+export const subscribeToUsers = (callback: (users: User[]) => void) => {
+    if (!isCloudEnabled || !db) return () => {};
+
+    const q = query(collection(db, "users"));
+    return onSnapshot(q, (snapshot) => {
+        const users: User[] = [];
+        snapshot.forEach((doc) => {
+            users.push({ ...doc.data(), id: doc.id } as User);
+        });
+        if (users.length > 0) {
+            localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
+            callback(users);
+        }
+    });
+};
 
 // --- Entries ---
 
-export const saveEntry = (entry: IsinEntry): void => {
-    const existing = getEntries();
+export const saveEntry = async (entry: IsinEntry): Promise<void> => {
+    // 1. Save Local (Optimistic UI)
+    const existing = getEntriesLocal();
     const updated = [entry, ...existing];
     localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
+
+    // 2. Save Cloud if enabled
+    if (isCloudEnabled && db) {
+        try {
+            // Remove ID to let Firestore generate one or use the one we created
+            const { id, ...data } = entry;
+            // Use setDoc if we want to preserve our UUID, or addDoc for auto ID
+            // Here we prefer preserving our frontend ID for consistency if needed, 
+            // but addDoc is safer for pure cloud. Let's use setDoc with our ID.
+            await setDoc(doc(db, "entries", id), data);
+        } catch (e) {
+            console.error("Error saving to cloud", e);
+            alert("Error guardando en la nube. Verifique conexión.");
+        }
+    }
 };
 
-export const getEntries = (): IsinEntry[] => {
+const getEntriesLocal = (): IsinEntry[] => {
     const raw = localStorage.getItem(STORAGE_KEY_ENTRIES);
     if (!raw) return [];
     try {
         return JSON.parse(raw);
     } catch (e) {
-        console.error("Error parsing entries", e);
         return [];
     }
+};
+
+export const getEntries = (): IsinEntry[] => {
+    return getEntriesLocal();
 };
 
 // --- Users ---
@@ -28,31 +144,41 @@ export const getEntries = (): IsinEntry[] => {
 export const getUsers = (): User[] => {
     const raw = localStorage.getItem(STORAGE_KEY_USERS);
     if (!raw) {
-        // Initialize with default if empty
         localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(DEFAULT_USERS));
         return DEFAULT_USERS;
     }
     try {
         const parsed = JSON.parse(raw);
-        // Migration: Ensure 'active' property exists for existing data
         return parsed.map((u: any) => ({
             ...u,
             active: u.active !== undefined ? u.active : true
         }));
     } catch (e) {
-        console.error("Error parsing users", e);
         return DEFAULT_USERS;
     }
 };
 
-export const saveUsers = (users: User[]): void => {
+export const saveUsers = async (users: User[]): Promise<void> => {
+    // Local
     localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
+
+    // Cloud
+    if (isCloudEnabled && db) {
+        try {
+            // Batch update or individual? For simplicity, we loop.
+            // In a real app, use batch().
+            for (const user of users) {
+                await setDoc(doc(db, "users", user.id), user);
+            }
+        } catch (e) {
+            console.error("Error syncing users to cloud", e);
+        }
+    }
 };
 
 export const getCurrentUser = (): User => {
     const users = getUsers();
     const id = localStorage.getItem(STORAGE_KEY_USER);
-    // Prefer finding an active user if the saved ID is not found or inactive (optional logic, kept simple here)
     const user = users.find(u => u.id === id);
     const firstActive = users.find(u => u.active) || users[0];
     return user || firstActive;
@@ -64,5 +190,36 @@ export const setCurrentUser = (userId: string): void => {
 
 export const clearData = (): void => {
     localStorage.removeItem(STORAGE_KEY_ENTRIES);
-    // Optional: We generally don't clear users on data clear, but could if requested.
 }
+
+// --- Migration Tool ---
+// Helper to push local data to cloud when first connecting
+export const syncLocalToCloud = async () => {
+    if (!isCloudEnabled || !db) return;
+
+    const localEntries = getEntriesLocal();
+    const localUsers = getUsers();
+
+    try {
+        // Sync Users
+        for (const user of localUsers) {
+            await setDoc(doc(db, "users", user.id), user);
+        }
+        // Sync Entries
+        const entryBatch = localEntries.slice(0, 500); // Safety limit for batch
+        for (const entry of entryBatch) {
+            // Check if exists first to avoid overwrite? 
+            // For simplicity, we assume if we are initing cloud, cloud might be empty or we overwrite.
+            await setDoc(doc(db, "entries", entry.id), {
+                isin: entry.isin,
+                userId: entry.userId,
+                timestamp: entry.timestamp,
+                dateStr: entry.dateStr
+            });
+        }
+        alert("Sincronización completada: Datos locales subidos a la nube.");
+    } catch (e) {
+        console.error("Sync error", e);
+        alert("Hubo un error al subir los datos locales.");
+    }
+};

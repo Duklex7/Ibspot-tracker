@@ -29,10 +29,13 @@ import {
     FileText,
     ChevronDown,
     FileSpreadsheet,
-    LineChart as LineChartIcon
+    LineChart as LineChartIcon,
+    Cloud,
+    CloudOff,
+    UploadCloud
 } from 'lucide-react';
 import { ActivityChart, ComparisonChart } from './components/DashboardCharts';
-import { DEFAULT_USERS, User, IsinEntry, TimeFrame } from './types';
+import { DEFAULT_USERS, User, IsinEntry, TimeFrame, FirebaseConfig } from './types';
 import * as storage from './services/storageService';
 import * as geminiService from './services/geminiService';
 
@@ -70,14 +73,14 @@ const formatDate = (dateStr: string) => {
 
 // --- Components ---
 
-const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
+const SidebarItem = ({ icon: Icon, label, active, onClick, extraClass = "" }: any) => (
     <button
         onClick={onClick}
         className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${
             active 
             ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-medium' 
             : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-gray-900 dark:hover:text-white'
-        }`}
+        } ${extraClass}`}
     >
         <Icon size={20} strokeWidth={active ? 2.5 : 2} />
         <span>{label}</span>
@@ -119,11 +122,15 @@ const StatCard = ({ label, value, subtext, icon: Icon, highlight = false, toolti
 // --- Main App ---
 
 export default function App() {
-    const [view, setView] = useState<'dashboard' | 'entry' | 'history' | 'users'>('entry');
+    const [view, setView] = useState<'dashboard' | 'entry' | 'history' | 'users' | 'cloud'>('entry');
     const [entries, setEntries] = useState<IsinEntry[]>([]);
     const [users, setUsers] = useState<User[]>([]);
     const [currentUser, setCurrentUser] = useState<User>(DEFAULT_USERS[0]);
     const [timeFrame, setTimeFrame] = useState<TimeFrame>('day');
+    
+    // Cloud Config State
+    const [isCloudConnected, setIsCloudConnected] = useState(false);
+    const [firebaseConfigInput, setFirebaseConfigInput] = useState('');
     
     // Theme State
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -154,24 +161,48 @@ export default function App() {
     const [historyUserFilter, setHistoryUserFilter] = useState('');
     const [showExportMenu, setShowExportMenu] = useState(false);
 
-    // Load data
+    // Load data & Setup Subscriptions
     useEffect(() => {
+        setIsCloudConnected(storage.isOnline());
+        
+        // Initial Load
         setEntries(storage.getEntries());
+        
+        // Setup Users
         const loadedUsers = storage.getUsers();
         setUsers(loadedUsers);
-        
-        // Ensure current user exists in the loaded users list, otherwise fallback
         const savedUser = storage.getCurrentUser();
         const validUser = loadedUsers.find(u => u.id === savedUser.id);
-        
         if (validUser && validUser.active) {
             setCurrentUser(validUser);
         } else {
-            // Fallback to first active user
             const activeUser = loadedUsers.find(u => u.active) || loadedUsers[0];
             setCurrentUser(activeUser);
             storage.setCurrentUser(activeUser.id);
         }
+
+        // Real-time Subscriptions (If online)
+        const unsubEntries = storage.subscribeToEntries((newEntries) => {
+            setEntries(newEntries);
+        });
+
+        const unsubUsers = storage.subscribeToUsers((newUsers) => {
+            setUsers(newUsers);
+            // Re-validate current user in case they were deactivated remotely
+            const current = storage.getCurrentUser();
+            const updatedCurrent = newUsers.find(u => u.id === current.id);
+            if (updatedCurrent && !updatedCurrent.active) {
+                // Switch to first active if I was deactivated
+                const firstActive = newUsers.find(u => u.active) || newUsers[0];
+                setCurrentUser(firstActive);
+                storage.setCurrentUser(firstActive.id);
+            }
+        });
+
+        return () => {
+            unsubEntries && unsubEntries();
+            unsubUsers && unsubUsers();
+        };
     }, []);
 
     // Theme Effect
@@ -197,7 +228,7 @@ export default function App() {
         }
     };
 
-    // User Management Handlers
+    // --- Handlers ---
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
@@ -215,19 +246,14 @@ export default function App() {
 
     const handleSaveUser = () => {
         if (!userNameInput.trim()) return;
-
         let newUsers = [...users];
-        
-        // Determine avatar: Custom Upload -> Existing (if editing) -> Generated
         const defaultAvatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userNameInput.trim())}`;
         const finalAvatar = customAvatar || defaultAvatar;
 
         if (editingUser) {
-            // Edit existing
             newUsers = newUsers.map(u => u.id === editingUser ? { ...u, name: userNameInput.trim(), avatar: finalAvatar } : u);
             setEditingUser(null);
         } else {
-            // Add new
             const newUser: User = {
                 id: crypto.randomUUID(),
                 name: userNameInput.trim(),
@@ -237,40 +263,30 @@ export default function App() {
             newUsers.push(newUser);
             setIsAddingUser(false);
         }
-
         setUsers(newUsers);
         storage.saveUsers(newUsers);
-        
-        // Reset form
         setUserNameInput('');
         setCustomAvatar(null);
-        
-        // Update current user if we just edited them
         if (editingUser === currentUser.id) {
             setCurrentUser(newUsers.find(u => u.id === editingUser)!);
         }
     };
 
     const handleToggleUserStatus = (userId: string, currentStatus: boolean) => {
-        // Prevent deactivating the last active user
         const activeCount = users.filter(u => u.active).length;
         if (currentStatus && activeCount <= 1) {
             alert("Debe haber al menos un usuario activo.");
             return;
         }
-
-        // Prevent deactivating yourself
         if (userId === currentUser.id && currentStatus) {
              if (!confirm("Estás a punto de desactivar tu usuario actual. La sesión cambiará a otro usuario disponible. ¿Continuar?")) {
                  return;
              }
         }
-
         const newUsers = users.map(u => u.id === userId ? { ...u, active: !currentStatus } : u);
         setUsers(newUsers);
         storage.saveUsers(newUsers);
 
-        // If we deactivated the active user, switch to another
         if (userId === currentUser.id && currentStatus) {
             const nextUser = newUsers.find(u => u.active);
             if (nextUser) {
@@ -283,22 +299,17 @@ export default function App() {
     const startEditUser = (user: User) => {
         setUserNameInput(user.name);
         setEditingUser(user.id);
-        
-        // Check if the current avatar is a generated DiceBear URL or a custom uploaded one
         const isGenerated = user.avatar.includes('api.dicebear.com');
         setCustomAvatar(isGenerated ? null : user.avatar);
-        
         setIsAddingUser(true);
     };
 
-    // Filter Logic
     const filteredEntries = useMemo(() => {
         const now = new Date();
         const start = getStartOfPeriod(now, timeFrame);
         return entries.filter(e => e.timestamp >= start.getTime());
     }, [entries, timeFrame]);
 
-    // Comparison Data Logic (Current Month vs Previous Month Cumulative)
     const comparisonData = useMemo(() => {
         const now = new Date();
         const currentMonth = now.getMonth();
@@ -308,7 +319,6 @@ export default function App() {
         const prevMonth = prevDate.getMonth();
         const prevYear = prevDate.getFullYear();
 
-        // Helper to filter entries by month/year
         const getMonthEntries = (m: number, y: number) => entries.filter(e => {
             const d = new Date(e.timestamp);
             return d.getMonth() === m && d.getFullYear() === y;
@@ -316,8 +326,6 @@ export default function App() {
 
         const currentEntries = getMonthEntries(currentMonth, currentYear);
         const prevEntries = getMonthEntries(prevMonth, prevYear);
-
-        // Days in current month (to set x-axis range)
         const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
         
         const data = [];
@@ -325,30 +333,20 @@ export default function App() {
         let prevRunningTotal = 0;
 
         for (let day = 1; day <= daysInMonth; day++) {
-            // Count entries for this specific day number in both months
             const currentDayCount = currentEntries.filter(e => new Date(e.timestamp).getDate() === day).length;
             const prevDayCount = prevEntries.filter(e => new Date(e.timestamp).getDate() === day).length;
-
             prevRunningTotal += prevDayCount;
 
-            const point: any = {
-                day: day,
-                anterior: prevRunningTotal
-            };
-
-            // Only add current month data if the day has passed or is today
-            // This prevents the line from dropping to zero or flatlining for future days
+            const point: any = { day: day, anterior: prevRunningTotal };
             if (day <= now.getDate()) {
                 currentRunningTotal += currentDayCount;
                 point.actual = currentRunningTotal;
             }
-
             data.push(point);
         }
         return data;
     }, [entries]);
 
-    // Leaderboard Logic
     const leaderboard = useMemo(() => {
         const counts: Record<string, number> = {};
         filteredEntries.forEach(e => {
@@ -362,20 +360,17 @@ export default function App() {
             .sort((a, b) => b.count - a.count);
     }, [filteredEntries, users]);
 
-    // Chart Data Logic
     const chartData = useMemo(() => {
         const data: Record<string, number> = {};
         filteredEntries.forEach(e => {
             const key = formatDate(e.dateStr); 
             data[key] = (data[key] || 0) + 1;
         });
-
-        const sortedKeys = Object.keys(data).sort((a,b) => 0); // Simplified sort
+        const sortedKeys = Object.keys(data).sort((a,b) => 0); 
         return sortedKeys.map(key => ({ label: key, value: data[key] }));
     }, [filteredEntries]);
 
-    // Handlers for Entries
-    const handleAddEntry = (e: React.FormEvent) => {
+    const handleAddEntry = async (e: React.FormEvent) => {
         e.preventDefault();
         const cleaned = isinInput.trim().toUpperCase();
 
@@ -385,7 +380,6 @@ export default function App() {
             return;
         }
 
-        // Duplicate Check
         const isDuplicate = entries.some(entry => entry.isin === cleaned);
         if (isDuplicate) {
             setEntryStatus('duplicate');
@@ -402,8 +396,8 @@ export default function App() {
         };
 
         const updated = [newEntry, ...entries];
-        setEntries(updated);
-        storage.saveEntry(newEntry);
+        setEntries(updated); // Optimistic
+        await storage.saveEntry(newEntry);
 
         setIsinInput('');
         setLastAdded(cleaned);
@@ -428,7 +422,6 @@ export default function App() {
         setIsGeneratingAi(false);
     };
 
-    // Update handleExportCsv to accept data parameter
     const handleExportCsv = (mode: 'filtered' | 'all') => {
         let dataToExport = mode === 'all' ? entries : entries.filter(entry => {
             const matchesIsin = entry.isin.toLowerCase().includes(historySearchIsin.toLowerCase());
@@ -465,7 +458,20 @@ export default function App() {
         setShowExportMenu(false);
     };
 
-    // --- Views ---
+    const handleSaveCloudConfig = () => {
+        try {
+            const config = JSON.parse(firebaseConfigInput);
+            storage.saveFirebaseConfig(config);
+            setIsCloudConnected(true);
+            setView('dashboard');
+            alert("Conexión guardada. Ahora los datos se sincronizarán.");
+            window.location.reload(); // Quickest way to re-init everything cleanly
+        } catch (e) {
+            alert("Error: El formato JSON no es válido.");
+        }
+    };
+
+    // --- Render Views ---
 
     const renderEntryView = () => (
         <div className="max-w-xl mx-auto mt-10">
@@ -529,17 +535,88 @@ export default function App() {
                     </div>
                 )}
             </div>
-
             <div className="mt-8 text-center text-sm text-gray-400 dark:text-gray-500">
                 <p>Estás registrando como <span className="font-semibold text-gray-600 dark:text-gray-300">{currentUser.name}</span></p>
             </div>
         </div>
     );
 
+    const renderCloudConfig = () => (
+        <div className="max-w-2xl mx-auto">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Conexión Online</h2>
+            <p className="text-gray-500 dark:text-gray-400 mb-8">
+                Para que todos los usuarios vean los datos en tiempo real, conecta la aplicación a una base de datos de Firebase.
+            </p>
+
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm">
+                {isCloudConnected ? (
+                    <div className="text-center space-y-6">
+                        <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto">
+                            <Cloud size={40} className="text-green-600 dark:text-green-400" />
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conectado a la Nube</h3>
+                            <p className="text-gray-500 dark:text-gray-400 mt-2">
+                                Los registros se sincronizan automáticamente entre todos los dispositivos conectados.
+                            </p>
+                        </div>
+                        <div className="flex gap-4 justify-center">
+                            <button 
+                                onClick={() => storage.syncLocalToCloud()}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center gap-2"
+                            >
+                                <UploadCloud size={18} /> Subir datos locales
+                            </button>
+                            <button 
+                                onClick={() => storage.clearFirebaseConfig()}
+                                className="px-4 py-2 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors flex items-center gap-2"
+                            >
+                                <CloudOff size={18} /> Desconectar
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="space-y-6">
+                        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-900/50 text-sm text-blue-800 dark:text-blue-300">
+                            <strong>Instrucciones:</strong>
+                            <ol className="list-decimal ml-5 mt-2 space-y-1">
+                                <li>Ve a <a href="https://console.firebase.google.com" target="_blank" className="underline">console.firebase.google.com</a> y crea un proyecto.</li>
+                                <li>Crea una base de datos <strong>Firestore</strong> (en modo prueba o producción).</li>
+                                <li>Ve a Configuración del Proyecto y copia la configuración del SDK (JSON).</li>
+                                <li>Pégala abajo.</li>
+                            </ol>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Configuración Firebase (JSON)</label>
+                            <textarea
+                                value={firebaseConfigInput}
+                                onChange={(e) => setFirebaseConfigInput(e.target.value)}
+                                placeholder='{ "apiKey": "AIza...", "authDomain": "...", "projectId": "..." }'
+                                className="w-full h-40 p-4 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
+                            ></textarea>
+                        </div>
+
+                        <button 
+                            onClick={handleSaveCloudConfig}
+                            disabled={!firebaseConfigInput}
+                            className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-3 rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+                        >
+                            Conectar y Sincronizar
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+
+    // Reuse existing render logic for Dashboard, History, Users (no change needed in logic, just routing)
     const renderDashboard = () => (
+        // ... (Same dashboard code as previous, but inserted here implicitly by structure)
+        // Since I'm in "replace file" mode, I need to include the FULL content of renderDashboard again
+        // to ensure the file is complete.
         <div className="max-w-6xl mx-auto space-y-8 animate-fade-in">
-            {/* Header Controls */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Panel de Control</h2>
                     <p className="text-gray-500 dark:text-gray-400">Rendimiento y contabilidad</p>
@@ -550,7 +627,7 @@ export default function App() {
                             key={tf}
                             onClick={() => {
                                 setTimeFrame(tf);
-                                setAiInsight(null); // Reset AI on change
+                                setAiInsight(null); 
                             }}
                             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                                 timeFrame === tf 
@@ -566,7 +643,6 @@ export default function App() {
                 </div>
             </div>
 
-            {/* AI Insight */}
             {aiInsight ? (
                 <div className="bg-gray-50 dark:bg-slate-800 dark:border-slate-600 p-6 rounded-2xl border border-gray-200 relative">
                     <button onClick={() => setAiInsight(null)} className="absolute top-4 right-4 text-gray-400 hover:text-red-600 dark:text-slate-400 dark:hover:text-white">
@@ -595,7 +671,6 @@ export default function App() {
                 </div>
             )}
 
-            {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <StatCard 
                     label="Registros Totales" 
@@ -621,7 +696,6 @@ export default function App() {
                 />
             </div>
 
-            {/* Comparison Chart Section (Only visible on larger screens to avoid clutter on mobile) */}
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
                 <h3 className="font-bold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
                     <LineChartIcon size={18} className="text-red-600"/> Progreso Mensual Acumulado
@@ -630,15 +704,12 @@ export default function App() {
                 <ComparisonChart data={comparisonData} isDarkMode={isDarkMode} />
             </div>
 
-            {/* Main Content Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Chart Section */}
                 <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
                     <h3 className="font-bold text-gray-800 dark:text-white mb-6">Tendencia de Cargas ({timeFrame === 'day' ? 'Hoy' : timeFrame})</h3>
                     <ActivityChart data={chartData} isDarkMode={isDarkMode} />
                 </div>
 
-                {/* Leaderboard Section */}
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
                     <h3 className="font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
                         <Users size={18} className="text-red-600"/> Ranking
@@ -677,139 +748,122 @@ export default function App() {
         </div>
     );
 
-    const renderHistory = () => {
-        // Filter logic inside render to keep state responsive
-        const filteredHistory = entries.filter(entry => {
-            const matchesIsin = entry.isin.toLowerCase().includes(historySearchIsin.toLowerCase());
-            const matchesUser = historyUserFilter ? entry.userId === historyUserFilter : true;
-            return matchesIsin && matchesUser;
-        });
-
-        const isFiltering = historySearchIsin || historyUserFilter;
-
-        return (
-            <div className="max-w-4xl mx-auto">
-                <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Historial</h2>
+    const renderHistory = () => (
+        <div className="max-w-4xl mx-auto">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Historial</h2>
+                <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                    <div className="relative flex-1 md:w-48">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                        <input
+                            type="text"
+                            placeholder="Buscar ISIN..."
+                            value={historySearchIsin}
+                            onChange={(e) => setHistorySearchIsin(e.target.value)}
+                            className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none text-slate-800 dark:text-white"
+                        />
+                    </div>
                     
-                    {/* Filters and Actions */}
-                    <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-                        <div className="relative flex-1 md:w-48">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                            <input
-                                type="text"
-                                placeholder="Buscar ISIN..."
-                                value={historySearchIsin}
-                                onChange={(e) => setHistorySearchIsin(e.target.value)}
-                                className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none text-slate-800 dark:text-white"
-                            />
-                        </div>
-                        
-                        <div className="relative flex-1 md:w-48">
-                            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                            <select
-                                value={historyUserFilter}
-                                onChange={(e) => setHistoryUserFilter(e.target.value)}
-                                className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none appearance-none cursor-pointer text-slate-800 dark:text-white"
-                            >
-                                <option value="">Todos los usuarios</option>
-                                {users.map(u => (
-                                    <option key={u.id} value={u.id}>{u.name}</option>
-                                ))}
-                            </select>
-                        </div>
+                    <div className="relative flex-1 md:w-48">
+                        <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                        <select
+                            value={historyUserFilter}
+                            onChange={(e) => setHistoryUserFilter(e.target.value)}
+                            className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none appearance-none cursor-pointer text-slate-800 dark:text-white"
+                        >
+                            <option value="">Todos los usuarios</option>
+                            {users.map(u => (
+                                <option key={u.id} value={u.id}>{u.name}</option>
+                            ))}
+                        </select>
+                    </div>
 
-                        <div className="relative">
-                            <button
-                                onClick={() => setShowExportMenu(!showExportMenu)}
-                                className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 dark:bg-red-600 text-white rounded-xl hover:bg-slate-700 dark:hover:bg-red-700 transition-colors shadow-sm font-medium text-sm"
-                            >
-                                <Download size={16} />
-                                <span className="hidden lg:inline">Exportar</span>
-                                <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`}/>
-                            </button>
-                            
-                            {showExportMenu && (
-                                <>
-                                    <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)}></div>
-                                    <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl z-20 py-1 overflow-hidden">
-                                        <button 
-                                            onClick={() => handleExportCsv('filtered')}
-                                            className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 flex items-center gap-2"
-                                        >
-                                            <FileSpreadsheet size={16} /> Vista Actual
-                                        </button>
-                                        <button 
-                                            onClick={() => handleExportCsv('all')}
-                                            className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 flex items-center gap-2 border-t border-gray-100 dark:border-slate-700"
-                                        >
-                                            <Archive size={16} /> Base de datos completa
-                                        </button>
-                                    </div>
-                                </>
-                            )}
-                        </div>
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowExportMenu(!showExportMenu)}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 dark:bg-red-600 text-white rounded-xl hover:bg-slate-700 dark:hover:bg-red-700 transition-colors shadow-sm font-medium text-sm"
+                        >
+                            <Download size={16} />
+                            <span className="hidden lg:inline">Exportar</span>
+                            <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`}/>
+                        </button>
+                        {showExportMenu && (
+                            <>
+                                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)}></div>
+                                <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl z-20 py-1 overflow-hidden">
+                                    <button 
+                                        onClick={() => handleExportCsv('filtered')}
+                                        className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 flex items-center gap-2"
+                                    >
+                                        <FileSpreadsheet size={16} /> Vista Actual
+                                    </button>
+                                    <button 
+                                        onClick={() => handleExportCsv('all')}
+                                        className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 flex items-center gap-2 border-t border-gray-100 dark:border-slate-700"
+                                    >
+                                        <Archive size={16} /> Base de datos completa
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
-
-                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden transition-colors">
-                    <table className="w-full text-left">
-                        <thead className="bg-gray-50 dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700">
-                            <tr>
-                                <th className="w-16 px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Tipo</th>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Hora/Fecha</th>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ISIN</th>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Usuario</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
-                            {filteredHistory.length === 0 ? (
-                                <tr>
-                                    <td colSpan={4} className="px-6 py-8 text-center text-gray-400">
-                                        {isFiltering 
-                                            ? "No se encontraron resultados para los filtros aplicados." 
-                                            : "No hay registros todavía."}
-                                    </td>
-                                </tr>
-                            ) : (
-                                filteredHistory.slice(0, 50).map((entry) => { 
-                                    const user = users.find(u => u.id === entry.userId);
-                                    return (
-                                        <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
-                                            <td className="px-6 py-4 text-center">
-                                                <div className="w-8 h-8 rounded-full bg-red-50 dark:bg-slate-700 flex items-center justify-center mx-auto text-red-600 dark:text-red-400">
-                                                    <FileText size={16} />
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
-                                                {new Date(entry.timestamp).toLocaleString('es-ES')}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm font-mono font-medium text-slate-800 dark:text-slate-200">
-                                                {entry.isin}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
-                                                {user ? (
-                                                    <img src={user.avatar} className="w-5 h-5 rounded-full object-cover" alt="" />
-                                                ) : (
-                                                    <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-slate-600"></div>
-                                                )}
-                                                {user?.name || 'Usuario Eliminado'}
-                                            </td>
-                                        </tr>
-                                    );
-                                })
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                {filteredHistory.length > 50 && (
-                    <p className="text-center text-gray-400 text-sm mt-4">
-                        Mostrando los últimos 50 de {filteredHistory.length} resultados encontrados.
-                    </p>
-                )}
             </div>
-        );
-    };
+
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden transition-colors">
+                <table className="w-full text-left">
+                    <thead className="bg-gray-50 dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700">
+                        <tr>
+                            <th className="w-16 px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Tipo</th>
+                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Hora/Fecha</th>
+                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ISIN</th>
+                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Usuario</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                        {entries
+                            .filter(entry => {
+                                const matchesIsin = entry.isin.toLowerCase().includes(historySearchIsin.toLowerCase());
+                                const matchesUser = historyUserFilter ? entry.userId === historyUserFilter : true;
+                                return matchesIsin && matchesUser;
+                            })
+                            .slice(0, 50)
+                            .map((entry) => { 
+                                const user = users.find(u => u.id === entry.userId);
+                                return (
+                                    <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                                        <td className="px-6 py-4 text-center">
+                                            <div className="w-8 h-8 rounded-full bg-red-50 dark:bg-slate-700 flex items-center justify-center mx-auto text-red-600 dark:text-red-400">
+                                                <FileText size={16} />
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
+                                            {new Date(entry.timestamp).toLocaleString('es-ES')}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm font-mono font-medium text-slate-800 dark:text-slate-200">
+                                            {entry.isin}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                                            {user ? (
+                                                <img src={user.avatar} className="w-5 h-5 rounded-full object-cover" alt="" />
+                                            ) : (
+                                                <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-slate-600"></div>
+                                            )}
+                                            {user?.name || 'Usuario Eliminado'}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        {entries.length === 0 && (
+                            <tr>
+                                <td colSpan={4} className="px-6 py-8 text-center text-gray-400">No hay registros todavía.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
 
     const renderUsersView = () => (
         <div className="max-w-4xl mx-auto">
@@ -832,13 +886,10 @@ export default function App() {
                 </button>
             </div>
 
-            {/* Add/Edit Form */}
             {isAddingUser && (
                 <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-lg border border-red-100 dark:border-slate-700 mb-8 animate-fade-in-up">
                     <h3 className="font-bold text-gray-800 dark:text-white mb-4">{editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
-                    
                     <div className="flex flex-col sm:flex-row gap-6 items-start">
-                        {/* Avatar Uploader */}
                         <div className="relative group shrink-0">
                             <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-gray-300 dark:border-slate-600 group-hover:border-red-500 transition-colors bg-gray-50 dark:bg-slate-700">
                                  <img 
@@ -862,7 +913,6 @@ export default function App() {
                                 className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none"
                                 autoFocus
                             />
-                            
                             <div className="flex justify-between items-center mt-2">
                                  <button 
                                     onClick={() => setCustomAvatar(null)}
@@ -872,7 +922,6 @@ export default function App() {
                                  >
                                     <RotateCcw size={12} /> Restablecer
                                  </button>
-
                                 <button 
                                     onClick={handleSaveUser}
                                     disabled={!userNameInput.trim()}
@@ -888,7 +937,7 @@ export default function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {users.map(user => {
-                    const isActive = user.active !== false; // Handle legacy true/undefined
+                    const isActive = user.active !== false; 
                     return (
                         <div key={user.id} className={`relative p-4 rounded-2xl border flex items-center justify-between group transition-all hover:shadow-md ${user.id === currentUser.id ? 'bg-white dark:bg-slate-800 border-red-500 ring-1 ring-red-500 dark:ring-red-600 dark:border-red-600' : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700'} ${!isActive ? 'opacity-60 bg-gray-50 dark:bg-slate-800/50' : ''}`}>
                             <div className="flex items-center gap-4">
@@ -908,14 +957,12 @@ export default function App() {
                                 <button 
                                     onClick={() => startEditUser(user)}
                                     className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                                    title="Editar nombre"
                                 >
                                     <Pencil size={18} />
                                 </button>
                                 <button 
                                     onClick={() => handleToggleUserStatus(user.id, isActive)}
                                     className={`p-2 rounded-lg transition-colors ${isActive ? 'text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-slate-700' : 'text-green-500 hover:text-green-600 hover:bg-green-50'}`}
-                                    title={isActive ? "Desactivar usuario (archivar)" : "Reactivar usuario"}
                                 >
                                     {isActive ? <Archive size={18} /> : <CheckCircle2 size={18} />}
                                 </button>
@@ -933,7 +980,6 @@ export default function App() {
             <aside className="bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 w-full md:w-64 flex-shrink-0 z-20 transition-colors">
                 <div className="p-6 flex items-center justify-between border-b border-gray-100 dark:border-slate-700">
                     <div className="flex items-center gap-2">
-                        {/* Ibspot Logo Simulation */}
                         <div className="flex items-center">
                              <span className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">ibspot</span>
                              <div className="relative flex items-center justify-center w-6 h-6 ml-1 mt-1">
@@ -969,6 +1015,15 @@ export default function App() {
                         active={view === 'users'} 
                         onClick={() => setView('users')} 
                     />
+                    <div className="pt-4 border-t border-gray-100 dark:border-slate-700 mt-4">
+                        <SidebarItem 
+                            icon={isCloudConnected ? Cloud : CloudOff} 
+                            label="Conexión Online" 
+                            active={view === 'cloud'} 
+                            onClick={() => setView('cloud')}
+                            extraClass={isCloudConnected ? "text-green-600 dark:text-green-400" : ""}
+                        />
+                    </div>
                 </div>
 
                 <div className="mt-auto border-t border-gray-100 dark:border-slate-700">
@@ -994,7 +1049,6 @@ export default function App() {
                                 </div>
                             </button>
                             
-                            {/* User Dropdown */}
                             <div className="hidden group-hover:block absolute bottom-full left-0 w-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl mb-2 overflow-hidden z-50">
                                 {users.filter(u => u.active !== false).map(u => (
                                     <button
@@ -1018,6 +1072,7 @@ export default function App() {
                 {view === 'dashboard' && renderDashboard()}
                 {view === 'history' && renderHistory()}
                 {view === 'users' && renderUsersView()}
+                {view === 'cloud' && renderCloudConfig()}
             </main>
         </div>
     );

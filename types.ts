@@ -21,6 +21,15 @@ export interface DashboardStats {
     dataPoints: { label: string; value: number }[];
 }
 
+export interface FirebaseConfig {
+    apiKey: string;
+    authDomain: string;
+    projectId: string;
+    storageBucket: string;
+    messagingSenderId: string;
+    appId: string;
+}
+
 export const DEFAULT_USERS: User[] = [
     { id: 'u1', name: 'Ana García', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ana', active: true },
     { id: 'u2', name: 'Carlos Ruiz', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Carlos', active: true },
