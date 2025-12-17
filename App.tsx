@@ -44,7 +44,8 @@ import {
     Edit3,
     Shield,
     ShieldCheck,
-    Ban
+    Ban,
+    List
 } from 'lucide-react';
 import { ActivityChart, ComparisonChart } from './components/DashboardCharts';
 import { User, IsinEntry, TimeFrame } from './types';
@@ -514,6 +515,7 @@ export default function App() {
     const [timeFrame, setTimeFrame] = useState<TimeFrame>('day');
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [editingTarget, setEditingTarget] = useState<User | null>(null);
+    const [adminTab, setAdminTab] = useState<'users' | 'entries'>('users');
     
     // Cloud Config State
     const [isCloudConnected, setIsCloudConnected] = useState(false);
@@ -687,7 +689,11 @@ export default function App() {
             return;
         }
 
-        const isDuplicate = entries.some(entry => entry.isin === cleaned);
+        // Logic Change: Duplicate check is now PER USER, not global.
+        const isDuplicate = entries.some(entry => 
+            entry.isin === cleaned && entry.userId === currentUser.id
+        );
+        
         if (isDuplicate) {
             setEntryStatus('duplicate');
             setTimeout(() => setEntryStatus('idle'), 3000);
@@ -826,7 +832,7 @@ export default function App() {
                         )}
                         {entryStatus === 'duplicate' && (
                             <p className="text-center text-yellow-600 dark:text-yellow-500 text-sm mt-2 flex justify-center items-center gap-1 font-medium">
-                                <AlertCircle size={14}/> ¡Atención! Este ISIN ya fue registrado previamente.
+                                <AlertCircle size={14}/> ¡Atención! Ya has registrado este ISIN anteriormente.
                             </p>
                         )}
                     </div>
@@ -1166,76 +1172,151 @@ export default function App() {
 
         return (
             <div className="max-w-6xl mx-auto space-y-6">
-                <div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <ShieldCheck className="text-red-600" /> Administración
-                    </h2>
-                    <p className="text-gray-500 dark:text-gray-400">Gestión de usuarios y permisos.</p>
+                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <ShieldCheck className="text-red-600" /> Administración
+                        </h2>
+                        <p className="text-gray-500 dark:text-gray-400">Gestión de usuarios y registros globales.</p>
+                    </div>
+                    <div className="flex bg-gray-100 dark:bg-slate-700 p-1 rounded-lg">
+                        <button 
+                            onClick={() => setAdminTab('users')}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${adminTab === 'users' ? 'bg-white dark:bg-slate-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-300 hover:text-gray-900'}`}
+                        >
+                            Usuarios
+                        </button>
+                        <button 
+                            onClick={() => setAdminTab('entries')}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${adminTab === 'entries' ? 'bg-white dark:bg-slate-600 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-300 hover:text-gray-900'}`}
+                        >
+                            Registros Globales
+                        </button>
+                    </div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/30">
-                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Usuario</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Email</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Rol</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Estado</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase text-right">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50 dark:divide-slate-700">
-                            {users.map(user => (
-                                <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                                    <td className="p-4">
-                                        <div className="flex items-center gap-3">
-                                            <img src={user.avatar} className="w-10 h-10 rounded-full bg-gray-200 object-cover" />
-                                            <span className="font-medium text-gray-900 dark:text-white">{user.name}</span>
-                                        </div>
-                                    </td>
-                                    <td className="p-4 text-sm text-gray-500 dark:text-gray-400">{user.email}</td>
-                                    <td className="p-4">
-                                        <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
-                                            {user.role || 'user'}
-                                        </span>
-                                    </td>
-                                    <td className="p-4">
-                                        <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${user.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                            {user.active ? 'Activo' : 'Inactivo'}
-                                        </span>
-                                    </td>
-                                    <td className="p-4 text-right space-x-2">
-                                        <button 
-                                            onClick={() => openEditModal(user)}
-                                            className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
-                                            title="Editar Usuario"
-                                        >
-                                            <Edit3 size={18} />
-                                        </button>
-                                        <button 
-                                            onClick={() => storage.adminToggleUserStatus(user.id, !user.active)}
-                                            className="p-2 text-gray-400 hover:text-orange-500 transition-colors"
-                                            title={user.active ? "Desactivar" : "Activar"}
-                                        >
-                                            <Ban size={18} />
-                                        </button>
-                                        <button 
-                                            onClick={() => {
-                                                if(confirm(`¿Eliminar usuario ${user.name} permanentemente?`)) {
-                                                    storage.adminDeleteUser(user.id);
-                                                }
-                                            }}
-                                            className="p-2 text-gray-400 hover:text-red-600 transition-colors"
-                                            title="Eliminar"
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
-                                    </td>
+                {adminTab === 'users' ? (
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/30">
+                                    <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Usuario</th>
+                                    <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Email</th>
+                                    <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Rol</th>
+                                    <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Estado</th>
+                                    <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase text-right">Acciones</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50 dark:divide-slate-700">
+                                {users.map(user => (
+                                    <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                                        <td className="p-4">
+                                            <div className="flex items-center gap-3">
+                                                <img src={user.avatar} className="w-10 h-10 rounded-full bg-gray-200 object-cover" />
+                                                <span className="font-medium text-gray-900 dark:text-white">{user.name}</span>
+                                            </div>
+                                        </td>
+                                        <td className="p-4 text-sm text-gray-500 dark:text-gray-400">{user.email}</td>
+                                        <td className="p-4">
+                                            <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                {user.role || 'user'}
+                                            </span>
+                                        </td>
+                                        <td className="p-4">
+                                            <span className={`text-xs px-2 py-1 rounded-full font-bold uppercase ${user.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                {user.active ? 'Activo' : 'Inactivo'}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 text-right space-x-2">
+                                            <button 
+                                                onClick={() => openEditModal(user)}
+                                                className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
+                                                title="Editar Usuario"
+                                            >
+                                                <Edit3 size={18} />
+                                            </button>
+                                            <button 
+                                                onClick={() => storage.adminToggleUserStatus(user.id, !user.active)}
+                                                className="p-2 text-gray-400 hover:text-orange-500 transition-colors"
+                                                title={user.active ? "Desactivar" : "Activar"}
+                                            >
+                                                <Ban size={18} />
+                                            </button>
+                                            <button 
+                                                onClick={() => {
+                                                    if(confirm(`¿Eliminar usuario ${user.name} permanentemente?`)) {
+                                                        storage.adminDeleteUser(user.id);
+                                                    }
+                                                }}
+                                                className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                                                title="Eliminar"
+                                            >
+                                                <Trash2 size={18} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                         <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/30">
+                                        <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Fecha</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">ISIN</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Subido Por</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase text-right">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50 dark:divide-slate-700">
+                                    {entries.length === 0 ? (
+                                         <tr>
+                                            <td colSpan={4} className="p-8 text-center text-gray-400">No hay registros en el sistema.</td>
+                                        </tr>
+                                    ) : (
+                                        entries.sort((a,b) => b.timestamp - a.timestamp).map(entry => {
+                                            const u = users.find(user => user.id === entry.userId);
+                                            return (
+                                                <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                                                    <td className="p-4 text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                                                        {new Date(entry.timestamp).toLocaleString('es-ES')}
+                                                    </td>
+                                                    <td className="p-4 font-mono font-medium text-gray-900 dark:text-white">
+                                                        {entry.isin}
+                                                    </td>
+                                                    <td className="p-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+                                                                {u ? <img src={u.avatar} className="w-full h-full" /> : <UserIcon size={14}/>}
+                                                            </div>
+                                                            <span className="text-sm text-gray-700 dark:text-gray-300">{u?.name || 'Desconocido'}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="p-4 text-right">
+                                                        <button 
+                                                            onClick={() => {
+                                                                if(confirm(`¿Eliminar registro ISIN ${entry.isin} permanentemente?`)) {
+                                                                    storage.deleteEntry(entry.id);
+                                                                }
+                                                            }}
+                                                            className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                                                            title="Eliminar Registro"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     };
