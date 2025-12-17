@@ -33,7 +33,12 @@ export const getUsers = (): User[] => {
         return DEFAULT_USERS;
     }
     try {
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        // Migration: Ensure 'active' property exists for existing data
+        return parsed.map((u: any) => ({
+            ...u,
+            active: u.active !== undefined ? u.active : true
+        }));
     } catch (e) {
         console.error("Error parsing users", e);
         return DEFAULT_USERS;
@@ -47,8 +52,10 @@ export const saveUsers = (users: User[]): void => {
 export const getCurrentUser = (): User => {
     const users = getUsers();
     const id = localStorage.getItem(STORAGE_KEY_USER);
+    // Prefer finding an active user if the saved ID is not found or inactive (optional logic, kept simple here)
     const user = users.find(u => u.id === id);
-    return user || users[0];
+    const firstActive = users.find(u => u.active) || users[0];
+    return user || firstActive;
 };
 
 export const setCurrentUser = (userId: string): void => {

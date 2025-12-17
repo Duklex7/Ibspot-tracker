@@ -20,7 +20,15 @@ import {
     Search,
     Filter,
     Moon,
-    Sun
+    Sun,
+    Camera,
+    RotateCcw,
+    Archive,
+    Power,
+    Info,
+    FileText,
+    ChevronDown,
+    FileSpreadsheet
 } from 'lucide-react';
 import { ActivityChart } from './components/DashboardCharts';
 import { DEFAULT_USERS, User, IsinEntry, TimeFrame } from './types';
@@ -75,15 +83,26 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
     </button>
 );
 
-const StatCard = ({ label, value, subtext, icon: Icon, highlight = false }: any) => (
-    <div className={`p-6 rounded-2xl border transition-colors ${
+const StatCard = ({ label, value, subtext, icon: Icon, highlight = false, tooltip = "" }: any) => (
+    <div className={`p-6 rounded-2xl border transition-colors group relative ${
         highlight 
         ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none' 
         : 'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 shadow-sm'
     }`}>
         <div className="flex justify-between items-start mb-4">
             <div>
-                <p className={`text-sm font-medium ${highlight ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>{label}</p>
+                <div className="flex items-center gap-2">
+                    <p className={`text-sm font-medium ${highlight ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>{label}</p>
+                    {tooltip && (
+                        <div className="relative group/tooltip cursor-help">
+                            <Info size={14} className={highlight ? 'text-blue-300' : 'text-gray-400'} />
+                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-10 text-center shadow-xl">
+                                {tooltip}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                            </div>
+                        </div>
+                    )}
+                </div>
                 <h3 className={`text-3xl font-bold mt-1 ${!highlight && 'text-gray-900 dark:text-white'}`}>{value}</h3>
             </div>
             <div className={`p-2 rounded-lg ${highlight ? 'bg-white/20' : 'bg-gray-50 dark:bg-slate-700'}`}>
@@ -116,7 +135,7 @@ export default function App() {
 
     // Form State
     const [isinInput, setIsinInput] = useState('');
-    const [entryStatus, setEntryStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [entryStatus, setEntryStatus] = useState<'idle' | 'success' | 'error' | 'duplicate'>('idle');
     const [lastAdded, setLastAdded] = useState<string | null>(null);
 
     // AI State
@@ -126,11 +145,13 @@ export default function App() {
     // User Management State
     const [editingUser, setEditingUser] = useState<string | null>(null);
     const [userNameInput, setUserNameInput] = useState('');
+    const [customAvatar, setCustomAvatar] = useState<string | null>(null);
     const [isAddingUser, setIsAddingUser] = useState(false);
 
     // History Filter State
     const [historySearchIsin, setHistorySearchIsin] = useState('');
     const [historyUserFilter, setHistoryUserFilter] = useState('');
+    const [showExportMenu, setShowExportMenu] = useState(false);
 
     // Load data
     useEffect(() => {
@@ -140,8 +161,16 @@ export default function App() {
         
         // Ensure current user exists in the loaded users list, otherwise fallback
         const savedUser = storage.getCurrentUser();
-        const validUser = loadedUsers.find(u => u.id === savedUser.id) || loadedUsers[0];
-        setCurrentUser(validUser);
+        const validUser = loadedUsers.find(u => u.id === savedUser.id);
+        
+        if (validUser && validUser.active) {
+            setCurrentUser(validUser);
+        } else {
+            // Fallback to first active user
+            const activeUser = loadedUsers.find(u => u.active) || loadedUsers[0];
+            setCurrentUser(activeUser);
+            storage.setCurrentUser(activeUser.id);
+        }
     }, []);
 
     // Theme Effect
@@ -161,28 +190,48 @@ export default function App() {
     // Change User
     const handleUserChange = (userId: string) => {
         const user = users.find(u => u.id === userId);
-        if (user) {
+        if (user && user.active) {
             setCurrentUser(user);
             storage.setCurrentUser(userId);
         }
     };
 
     // User Management Handlers
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            if (file.size > 500000) { // Limit to 500KB
+                alert("La imagen es demasiado grande. Por favor usa una imagen menor a 500KB.");
+                return;
+            }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setCustomAvatar(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     const handleSaveUser = () => {
         if (!userNameInput.trim()) return;
 
         let newUsers = [...users];
         
+        // Determine avatar: Custom Upload -> Existing (if editing) -> Generated
+        const defaultAvatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userNameInput.trim())}`;
+        const finalAvatar = customAvatar || defaultAvatar;
+
         if (editingUser) {
             // Edit existing
-            newUsers = newUsers.map(u => u.id === editingUser ? { ...u, name: userNameInput.trim() } : u);
+            newUsers = newUsers.map(u => u.id === editingUser ? { ...u, name: userNameInput.trim(), avatar: finalAvatar } : u);
             setEditingUser(null);
         } else {
             // Add new
             const newUser: User = {
                 id: crypto.randomUUID(),
                 name: userNameInput.trim(),
-                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userNameInput.trim())}`
+                avatar: finalAvatar,
+                active: true
             };
             newUsers.push(newUser);
             setIsAddingUser(false);
@@ -190,7 +239,10 @@ export default function App() {
 
         setUsers(newUsers);
         storage.saveUsers(newUsers);
+        
+        // Reset form
         setUserNameInput('');
+        setCustomAvatar(null);
         
         // Update current user if we just edited them
         if (editingUser === currentUser.id) {
@@ -198,19 +250,29 @@ export default function App() {
         }
     };
 
-    const handleDeleteUser = (userId: string) => {
-        if (users.length <= 1) {
-            alert("Debe haber al menos un usuario.");
+    const handleToggleUserStatus = (userId: string, currentStatus: boolean) => {
+        // Prevent deactivating the last active user
+        const activeCount = users.filter(u => u.active).length;
+        if (currentStatus && activeCount <= 1) {
+            alert("Debe haber al menos un usuario activo.");
             return;
         }
-        if (confirm("¿Estás seguro de eliminar este usuario? Sus registros históricos permanecerán pero no podrá registrar nuevos productos.")) {
-            const newUsers = users.filter(u => u.id !== userId);
-            setUsers(newUsers);
-            storage.saveUsers(newUsers);
 
-            // If we deleted the active user, switch to the first available
-            if (currentUser.id === userId) {
-                const nextUser = newUsers[0];
+        // Prevent deactivating yourself
+        if (userId === currentUser.id && currentStatus) {
+             if (!confirm("Estás a punto de desactivar tu usuario actual. La sesión cambiará a otro usuario disponible. ¿Continuar?")) {
+                 return;
+             }
+        }
+
+        const newUsers = users.map(u => u.id === userId ? { ...u, active: !currentStatus } : u);
+        setUsers(newUsers);
+        storage.saveUsers(newUsers);
+
+        // If we deactivated the active user, switch to another
+        if (userId === currentUser.id && currentStatus) {
+            const nextUser = newUsers.find(u => u.active);
+            if (nextUser) {
                 setCurrentUser(nextUser);
                 storage.setCurrentUser(nextUser.id);
             }
@@ -220,6 +282,11 @@ export default function App() {
     const startEditUser = (user: User) => {
         setUserNameInput(user.name);
         setEditingUser(user.id);
+        
+        // Check if the current avatar is a generated DiceBear URL or a custom uploaded one
+        const isGenerated = user.avatar.includes('api.dicebear.com');
+        setCustomAvatar(isGenerated ? null : user.avatar);
+        
         setIsAddingUser(true);
     };
 
@@ -267,6 +334,14 @@ export default function App() {
             return;
         }
 
+        // Duplicate Check
+        const isDuplicate = entries.some(entry => entry.isin === cleaned);
+        if (isDuplicate) {
+            setEntryStatus('duplicate');
+            setTimeout(() => setEntryStatus('idle'), 3000);
+            return;
+        }
+
         const newEntry: IsinEntry = {
             id: crypto.randomUUID(),
             isin: cleaned,
@@ -303,7 +378,13 @@ export default function App() {
     };
 
     // Update handleExportCsv to accept data parameter
-    const handleExportCsv = (dataToExport: IsinEntry[] = entries) => {
+    const handleExportCsv = (mode: 'filtered' | 'all') => {
+        let dataToExport = mode === 'all' ? entries : entries.filter(entry => {
+            const matchesIsin = entry.isin.toLowerCase().includes(historySearchIsin.toLowerCase());
+            const matchesUser = historyUserFilter ? entry.userId === historyUserFilter : true;
+            return matchesIsin && matchesUser;
+        });
+
         if (dataToExport.length === 0) return;
 
         const headers = ['Fecha', 'Hora', 'ISIN', 'Usuario', 'ID Usuario'];
@@ -324,12 +405,13 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.setAttribute('href', url);
-        link.setAttribute('download', `ibspot_registros_${new Date().toISOString().split('T')[0]}.csv`);
+        link.setAttribute('download', `ibspot_registros_${mode}_${new Date().toISOString().split('T')[0]}.csv`);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
+        setShowExportMenu(false);
     };
 
     // --- Views ---
@@ -356,6 +438,7 @@ export default function App() {
                                 placeholder="US0378331005..."
                                 className={`block w-full text-center text-3xl font-mono p-4 rounded-xl border-2 focus:ring-4 focus:outline-none transition-all uppercase tracking-wider
                                     ${entryStatus === 'error' ? 'border-red-300 focus:border-red-500 focus:ring-red-100 bg-red-50 text-red-900' : 
+                                      entryStatus === 'duplicate' ? 'border-yellow-300 focus:border-yellow-500 focus:ring-yellow-100 bg-yellow-50 text-yellow-900' :
                                       entryStatus === 'success' ? 'border-green-300 focus:border-green-500 focus:ring-green-100 bg-green-50' : 
                                       'border-gray-200 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-100 dark:focus:ring-blue-900 bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-white'}`}
                                 autoFocus
@@ -364,6 +447,11 @@ export default function App() {
                         {entryStatus === 'error' && (
                             <p className="text-center text-red-500 text-sm mt-2 flex justify-center items-center gap-1">
                                 <AlertCircle size={14}/> Código demasiado corto o inválido.
+                            </p>
+                        )}
+                        {entryStatus === 'duplicate' && (
+                            <p className="text-center text-yellow-600 dark:text-yellow-500 text-sm mt-2 flex justify-center items-center gap-1 font-medium">
+                                <AlertCircle size={14}/> ¡Atención! Este ISIN ya fue registrado previamente.
                             </p>
                         )}
                     </div>
@@ -464,18 +552,21 @@ export default function App() {
                     subtext="En el periodo seleccionado"
                     icon={TrendingUp}
                     highlight={true}
+                    tooltip="Cantidad total de códigos ISIN subidos en el rango de tiempo actual."
                 />
                 <StatCard 
                     label="Usuario Destacado" 
                     value={leaderboard.length > 0 ? leaderboard[0].user?.name.split(' ')[0] : '-'} 
                     subtext={leaderboard.length > 0 ? `${leaderboard[0].count} registros` : ''}
                     icon={Trophy}
+                    tooltip="La persona que más registros ha realizado en este periodo."
                 />
                 <StatCard 
                     label="Promedio Diario" 
                     value={Math.round(filteredEntries.length / (chartData.length || 1))} 
                     subtext="Registros por día activo"
                     icon={BarChart3}
+                    tooltip="Promedio de registros por cada día que hubo actividad."
                 />
             </div>
 
@@ -568,14 +659,36 @@ export default function App() {
                             </select>
                         </div>
 
-                        <button
-                            onClick={() => handleExportCsv(filteredHistory)}
-                            disabled={filteredHistory.length === 0}
-                            className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 dark:bg-blue-600 text-white rounded-xl hover:bg-slate-700 dark:hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm font-medium text-sm"
-                        >
-                            <Download size={16} />
-                            <span className="md:hidden lg:inline">Exportar</span>
-                        </button>
+                        <div className="relative">
+                            <button
+                                onClick={() => setShowExportMenu(!showExportMenu)}
+                                className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 dark:bg-blue-600 text-white rounded-xl hover:bg-slate-700 dark:hover:bg-blue-700 transition-colors shadow-sm font-medium text-sm"
+                            >
+                                <Download size={16} />
+                                <span className="hidden lg:inline">Exportar</span>
+                                <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`}/>
+                            </button>
+                            
+                            {showExportMenu && (
+                                <>
+                                    <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)}></div>
+                                    <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl z-20 py-1 overflow-hidden">
+                                        <button 
+                                            onClick={() => handleExportCsv('filtered')}
+                                            className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 flex items-center gap-2"
+                                        >
+                                            <FileSpreadsheet size={16} /> Vista Actual
+                                        </button>
+                                        <button 
+                                            onClick={() => handleExportCsv('all')}
+                                            className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 flex items-center gap-2 border-t border-gray-100 dark:border-slate-700"
+                                        >
+                                            <Archive size={16} /> Base de datos completa
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -583,6 +696,7 @@ export default function App() {
                     <table className="w-full text-left">
                         <thead className="bg-gray-50 dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700">
                             <tr>
+                                <th className="w-16 px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Tipo</th>
                                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Hora/Fecha</th>
                                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ISIN</th>
                                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Usuario</th>
@@ -591,7 +705,7 @@ export default function App() {
                         <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                             {filteredHistory.length === 0 ? (
                                 <tr>
-                                    <td colSpan={3} className="px-6 py-8 text-center text-gray-400">
+                                    <td colSpan={4} className="px-6 py-8 text-center text-gray-400">
                                         {isFiltering 
                                             ? "No se encontraron resultados para los filtros aplicados." 
                                             : "No hay registros todavía."}
@@ -602,6 +716,11 @@ export default function App() {
                                     const user = users.find(u => u.id === entry.userId);
                                     return (
                                         <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                                            <td className="px-6 py-4 text-center">
+                                                <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-slate-700 flex items-center justify-center mx-auto text-blue-500 dark:text-blue-400">
+                                                    <FileText size={16} />
+                                                </div>
+                                            </td>
                                             <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
                                                 {new Date(entry.timestamp).toLocaleString('es-ES')}
                                             </td>
@@ -610,7 +729,7 @@ export default function App() {
                                             </td>
                                             <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
                                                 {user ? (
-                                                    <img src={user.avatar} className="w-5 h-5 rounded-full" alt="" />
+                                                    <img src={user.avatar} className="w-5 h-5 rounded-full object-cover" alt="" />
                                                 ) : (
                                                     <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-slate-600"></div>
                                                 )}
@@ -643,6 +762,7 @@ export default function App() {
                     onClick={() => {
                         setUserNameInput('');
                         setEditingUser(null);
+                        setCustomAvatar(null);
                         setIsAddingUser(!isAddingUser);
                     }}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-white font-medium transition-all shadow-md active:scale-95 ${isAddingUser ? 'bg-gray-400 hover:bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}`}
@@ -656,54 +776,93 @@ export default function App() {
             {isAddingUser && (
                 <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-lg border border-blue-100 dark:border-slate-700 mb-8 animate-fade-in-up">
                     <h3 className="font-bold text-gray-800 dark:text-white mb-4">{editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
-                    <div className="flex gap-3">
-                        <input 
-                            type="text" 
-                            value={userNameInput}
-                            onChange={(e) => setUserNameInput(e.target.value)}
-                            placeholder="Nombre del usuario (ej. Laura Méndez)"
-                            className="flex-1 p-3 rounded-xl border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none"
-                            autoFocus
-                        />
-                        <button 
-                            onClick={handleSaveUser}
-                            disabled={!userNameInput.trim()}
-                            className="bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2"
-                        >
-                            <Save size={20} /> Guardar
-                        </button>
+                    
+                    <div className="flex flex-col sm:flex-row gap-6 items-start">
+                        {/* Avatar Uploader */}
+                        <div className="relative group shrink-0">
+                            <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-gray-300 dark:border-slate-600 group-hover:border-blue-500 transition-colors bg-gray-50 dark:bg-slate-700">
+                                 <img 
+                                    src={customAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userNameInput.trim() || 'placeholder')}`} 
+                                    alt="Preview" 
+                                    className="w-full h-full object-cover"
+                                />
+                            </div>
+                            <label className="absolute inset-0 flex items-center justify-center bg-black/40 text-white opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-opacity">
+                                <Camera size={24} />
+                                <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                            </label>
+                        </div>
+
+                        <div className="flex-1 w-full flex flex-col gap-3">
+                             <input 
+                                type="text" 
+                                value={userNameInput}
+                                onChange={(e) => setUserNameInput(e.target.value)}
+                                placeholder="Nombre del usuario (ej. Laura Méndez)"
+                                className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none"
+                                autoFocus
+                            />
+                            
+                            <div className="flex justify-between items-center mt-2">
+                                 <button 
+                                    onClick={() => setCustomAvatar(null)}
+                                    className={`text-xs flex items-center gap-1 hover:text-red-500 transition-colors ${customAvatar ? 'text-gray-500' : 'text-transparent pointer-events-none'}`}
+                                    title="Quitar foto personalizada"
+                                    disabled={!customAvatar}
+                                 >
+                                    <RotateCcw size={12} /> Restablecer
+                                 </button>
+
+                                <button 
+                                    onClick={handleSaveUser}
+                                    disabled={!userNameInput.trim()}
+                                    className="bg-green-600 text-white px-6 py-2.5 rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2 shadow-sm"
+                                >
+                                    <Save size={20} /> Guardar
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {users.map(user => (
-                    <div key={user.id} className={`p-4 rounded-2xl border bg-white dark:bg-slate-800 flex items-center justify-between group transition-all hover:shadow-md ${user.id === currentUser.id ? 'border-blue-500 ring-1 ring-blue-500 dark:ring-blue-600 dark:border-blue-600' : 'border-gray-200 dark:border-slate-700'}`}>
-                        <div className="flex items-center gap-4">
-                            <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-full bg-gray-100 dark:bg-slate-700 object-cover" />
-                            <div>
-                                <h4 className="font-bold text-gray-900 dark:text-white">{user.name}</h4>
-                                {user.id === currentUser.id && <span className="text-xs text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">Activo ahora</span>}
+                {users.map(user => {
+                    const isActive = user.active !== false; // Handle legacy true/undefined
+                    return (
+                        <div key={user.id} className={`relative p-4 rounded-2xl border flex items-center justify-between group transition-all hover:shadow-md ${user.id === currentUser.id ? 'bg-white dark:bg-slate-800 border-blue-500 ring-1 ring-blue-500 dark:ring-blue-600 dark:border-blue-600' : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700'} ${!isActive ? 'opacity-60 bg-gray-50 dark:bg-slate-800/50' : ''}`}>
+                            <div className="flex items-center gap-4">
+                                <div className="relative">
+                                    <img src={user.avatar} alt={user.name} className={`w-12 h-12 rounded-full bg-gray-100 dark:bg-slate-700 object-cover ${!isActive && 'grayscale'}`} />
+                                    {!isActive && <div className="absolute -bottom-1 -right-1 bg-gray-500 text-white rounded-full p-0.5 border-2 border-white dark:border-slate-800"><Power size={10} /></div>}
+                                </div>
+                                <div>
+                                    <h4 className={`font-bold ${isActive ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>{user.name}</h4>
+                                    <div className="flex gap-2 items-center">
+                                        {user.id === currentUser.id && <span className="text-xs text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">Activo ahora</span>}
+                                        {!isActive && <span className="text-xs text-gray-500 font-medium bg-gray-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">Inactivo</span>}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                <button 
+                                    onClick={() => startEditUser(user)}
+                                    className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                    title="Editar nombre"
+                                >
+                                    <Pencil size={18} />
+                                </button>
+                                <button 
+                                    onClick={() => handleToggleUserStatus(user.id, isActive)}
+                                    className={`p-2 rounded-lg transition-colors ${isActive ? 'text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-slate-700' : 'text-green-500 hover:text-green-600 hover:bg-green-50'}`}
+                                    title={isActive ? "Desactivar usuario (archivar)" : "Reactivar usuario"}
+                                >
+                                    {isActive ? <Archive size={18} /> : <CheckCircle2 size={18} />}
+                                </button>
                             </div>
                         </div>
-                        <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                            <button 
-                                onClick={() => startEditUser(user)}
-                                className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                                title="Editar nombre"
-                            >
-                                <Pencil size={18} />
-                            </button>
-                            <button 
-                                onClick={() => handleDeleteUser(user.id)}
-                                className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                                title="Eliminar usuario"
-                            >
-                                <Trash2 size={18} />
-                            </button>
-                        </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
@@ -773,13 +932,13 @@ export default function App() {
                             
                             {/* User Dropdown */}
                             <div className="hidden group-hover:block absolute bottom-full left-0 w-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl mb-2 overflow-hidden z-50">
-                                {users.map(u => (
+                                {users.filter(u => u.active !== false).map(u => (
                                     <button
                                         key={u.id}
                                         onClick={() => handleUserChange(u.id)}
                                         className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 ${u.id === currentUser.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}
                                     >
-                                        <img src={u.avatar} className="w-6 h-6 rounded-full" />
+                                        <img src={u.avatar} className="w-6 h-6 rounded-full object-cover" />
                                         {u.name}
                                     </button>
                                 ))}

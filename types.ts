@@ -2,6 +2,7 @@ export interface User {
     id: string;
     name: string;
     avatar: string;
+    active: boolean;
 }
 
 export interface IsinEntry {
@@ -21,8 +22,8 @@ export interface DashboardStats {
 }
 
 export const DEFAULT_USERS: User[] = [
-    { id: 'u1', name: 'Ana García', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ana' },
-    { id: 'u2', name: 'Carlos Ruiz', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Carlos' },
-    { id: 'u3', name: 'Maria Lopez', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Maria' },
-    { id: 'u4', name: 'Juan Perez', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan' },
+    { id: 'u1', name: 'Ana García', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ana', active: true },
+    { id: 'u2', name: 'Carlos Ruiz', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Carlos', active: true },
+    { id: 'u3', name: 'Maria Lopez', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Maria', active: true },
+    { id: 'u4', name: 'Juan Perez', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan', active: true },
 ];
