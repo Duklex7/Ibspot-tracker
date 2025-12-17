@@ -28,9 +28,10 @@ import {
     Info,
     FileText,
     ChevronDown,
-    FileSpreadsheet
+    FileSpreadsheet,
+    LineChart as LineChartIcon
 } from 'lucide-react';
-import { ActivityChart } from './components/DashboardCharts';
+import { ActivityChart, ComparisonChart } from './components/DashboardCharts';
 import { DEFAULT_USERS, User, IsinEntry, TimeFrame } from './types';
 import * as storage from './services/storageService';
 import * as geminiService from './services/geminiService';
@@ -74,7 +75,7 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
         onClick={onClick}
         className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${
             active 
-            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium' 
+            ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-medium' 
             : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-gray-900 dark:hover:text-white'
         }`}
     >
@@ -86,19 +87,19 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
 const StatCard = ({ label, value, subtext, icon: Icon, highlight = false, tooltip = "" }: any) => (
     <div className={`p-6 rounded-2xl border transition-colors group relative ${
         highlight 
-        ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none' 
+        ? 'bg-red-600 border-red-600 text-white shadow-lg shadow-red-200 dark:shadow-none' 
         : 'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 shadow-sm'
     }`}>
         <div className="flex justify-between items-start mb-4">
             <div>
                 <div className="flex items-center gap-2">
-                    <p className={`text-sm font-medium ${highlight ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>{label}</p>
+                    <p className={`text-sm font-medium ${highlight ? 'text-red-100' : 'text-gray-500 dark:text-gray-400'}`}>{label}</p>
                     {tooltip && (
                         <div className="relative group/tooltip cursor-help">
-                            <Info size={14} className={highlight ? 'text-blue-300' : 'text-gray-400'} />
-                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-10 text-center shadow-xl">
+                            <Info size={14} className={highlight ? 'text-red-200' : 'text-gray-400'} />
+                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-48 p-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-10 text-center shadow-xl">
                                 {tooltip}
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
                             </div>
                         </div>
                     )}
@@ -109,7 +110,7 @@ const StatCard = ({ label, value, subtext, icon: Icon, highlight = false, toolti
                 <Icon size={20} className={highlight ? 'text-white' : 'text-gray-400 dark:text-gray-300'} />
             </div>
         </div>
-        {subtext && <p className={`text-sm ${highlight ? 'text-blue-200' : 'text-green-600 dark:text-green-400'} flex items-center`}>
+        {subtext && <p className={`text-sm ${highlight ? 'text-red-100' : 'text-green-600 dark:text-green-400'} flex items-center`}>
             {subtext}
         </p>}
     </div>
@@ -297,6 +298,56 @@ export default function App() {
         return entries.filter(e => e.timestamp >= start.getTime());
     }, [entries, timeFrame]);
 
+    // Comparison Data Logic (Current Month vs Previous Month Cumulative)
+    const comparisonData = useMemo(() => {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        
+        const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const prevMonth = prevDate.getMonth();
+        const prevYear = prevDate.getFullYear();
+
+        // Helper to filter entries by month/year
+        const getMonthEntries = (m: number, y: number) => entries.filter(e => {
+            const d = new Date(e.timestamp);
+            return d.getMonth() === m && d.getFullYear() === y;
+        });
+
+        const currentEntries = getMonthEntries(currentMonth, currentYear);
+        const prevEntries = getMonthEntries(prevMonth, prevYear);
+
+        // Days in current month (to set x-axis range)
+        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+        
+        const data = [];
+        let currentRunningTotal = 0;
+        let prevRunningTotal = 0;
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            // Count entries for this specific day number in both months
+            const currentDayCount = currentEntries.filter(e => new Date(e.timestamp).getDate() === day).length;
+            const prevDayCount = prevEntries.filter(e => new Date(e.timestamp).getDate() === day).length;
+
+            prevRunningTotal += prevDayCount;
+
+            const point: any = {
+                day: day,
+                anterior: prevRunningTotal
+            };
+
+            // Only add current month data if the day has passed or is today
+            // This prevents the line from dropping to zero or flatlining for future days
+            if (day <= now.getDate()) {
+                currentRunningTotal += currentDayCount;
+                point.actual = currentRunningTotal;
+            }
+
+            data.push(point);
+        }
+        return data;
+    }, [entries]);
+
     // Leaderboard Logic
     const leaderboard = useMemo(() => {
         const counts: Record<string, number> = {};
@@ -440,7 +491,7 @@ export default function App() {
                                     ${entryStatus === 'error' ? 'border-red-300 focus:border-red-500 focus:ring-red-100 bg-red-50 text-red-900' : 
                                       entryStatus === 'duplicate' ? 'border-yellow-300 focus:border-yellow-500 focus:ring-yellow-100 bg-yellow-50 text-yellow-900' :
                                       entryStatus === 'success' ? 'border-green-300 focus:border-green-500 focus:ring-green-100 bg-green-50' : 
-                                      'border-gray-200 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-100 dark:focus:ring-blue-900 bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-white'}`}
+                                      'border-gray-200 dark:border-slate-600 focus:border-red-500 focus:ring-red-100 dark:focus:ring-red-900/30 bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-white'}`}
                                 autoFocus
                             />
                         </div>
@@ -459,7 +510,7 @@ export default function App() {
                     <button
                         type="submit"
                         disabled={!isinInput}
-                        className="w-full bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-lg font-semibold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                        className="w-full bg-red-600 dark:bg-red-600 hover:bg-red-700 dark:hover:bg-red-700 disabled:bg-gray-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-lg font-semibold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                     >
                         <PlusCircle size={24} />
                         <span>Registrar Ahora</span>
@@ -503,7 +554,7 @@ export default function App() {
                             }}
                             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                                 timeFrame === tf 
-                                ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-sm' 
+                                ? 'bg-red-600 text-white shadow-sm' 
                                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700'
                             }`}
                         >
@@ -517,17 +568,17 @@ export default function App() {
 
             {/* AI Insight */}
             {aiInsight ? (
-                <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 dark:border-slate-600 p-6 rounded-2xl border border-blue-100 relative">
-                    <button onClick={() => setAiInsight(null)} className="absolute top-4 right-4 text-blue-400 hover:text-blue-700 dark:text-slate-400 dark:hover:text-white">
+                <div className="bg-gray-50 dark:bg-slate-800 dark:border-slate-600 p-6 rounded-2xl border border-gray-200 relative">
+                    <button onClick={() => setAiInsight(null)} className="absolute top-4 right-4 text-gray-400 hover:text-red-600 dark:text-slate-400 dark:hover:text-white">
                         <X size={18} />
                     </button>
                     <div className="flex items-start gap-4">
                         <div className="bg-white dark:bg-slate-700 p-2 rounded-full shadow-sm">
-                            <Sparkles className="text-indigo-500 dark:text-indigo-400" size={20} />
+                            <Sparkles className="text-red-500 dark:text-red-400" size={20} />
                         </div>
                         <div>
-                            <h4 className="font-semibold text-indigo-900 dark:text-indigo-300 text-sm mb-1">Análisis IA</h4>
-                            <p className="text-indigo-800 dark:text-slate-300 leading-relaxed text-sm md:text-base">"{aiInsight}"</p>
+                            <h4 className="font-semibold text-gray-900 dark:text-gray-100 text-sm mb-1">Análisis IA</h4>
+                            <p className="text-gray-700 dark:text-slate-300 leading-relaxed text-sm md:text-base">"{aiInsight}"</p>
                         </div>
                     </div>
                 </div>
@@ -536,7 +587,7 @@ export default function App() {
                      <button 
                         onClick={handleGenerateInsight}
                         disabled={isGeneratingAi}
-                        className="text-xs flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors disabled:opacity-50"
+                        className="text-xs flex items-center gap-1.5 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                     >
                         <Sparkles size={14} />
                         {isGeneratingAi ? 'Analizando...' : 'Generar reporte inteligente'}
@@ -570,18 +621,27 @@ export default function App() {
                 />
             </div>
 
+            {/* Comparison Chart Section (Only visible on larger screens to avoid clutter on mobile) */}
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
+                <h3 className="font-bold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
+                    <LineChartIcon size={18} className="text-red-600"/> Progreso Mensual Acumulado
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-6">Comparativa de crecimiento entre el mes actual y el mes anterior.</p>
+                <ComparisonChart data={comparisonData} isDarkMode={isDarkMode} />
+            </div>
+
             {/* Main Content Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Chart Section */}
                 <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
-                    <h3 className="font-bold text-gray-800 dark:text-white mb-6">Tendencia de Cargas</h3>
+                    <h3 className="font-bold text-gray-800 dark:text-white mb-6">Tendencia de Cargas ({timeFrame === 'day' ? 'Hoy' : timeFrame})</h3>
                     <ActivityChart data={chartData} isDarkMode={isDarkMode} />
                 </div>
 
                 {/* Leaderboard Section */}
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
                     <h3 className="font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
-                        <Users size={18} className="text-blue-500"/> Ranking
+                        <Users size={18} className="text-red-600"/> Ranking
                     </h3>
                     <div className="space-y-4">
                         {leaderboard.length === 0 ? (
@@ -641,7 +701,7 @@ export default function App() {
                                 placeholder="Buscar ISIN..."
                                 value={historySearchIsin}
                                 onChange={(e) => setHistorySearchIsin(e.target.value)}
-                                className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none text-slate-800 dark:text-white"
+                                className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none text-slate-800 dark:text-white"
                             />
                         </div>
                         
@@ -650,7 +710,7 @@ export default function App() {
                             <select
                                 value={historyUserFilter}
                                 onChange={(e) => setHistoryUserFilter(e.target.value)}
-                                className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none appearance-none cursor-pointer text-slate-800 dark:text-white"
+                                className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none appearance-none cursor-pointer text-slate-800 dark:text-white"
                             >
                                 <option value="">Todos los usuarios</option>
                                 {users.map(u => (
@@ -662,7 +722,7 @@ export default function App() {
                         <div className="relative">
                             <button
                                 onClick={() => setShowExportMenu(!showExportMenu)}
-                                className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 dark:bg-blue-600 text-white rounded-xl hover:bg-slate-700 dark:hover:bg-blue-700 transition-colors shadow-sm font-medium text-sm"
+                                className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 dark:bg-red-600 text-white rounded-xl hover:bg-slate-700 dark:hover:bg-red-700 transition-colors shadow-sm font-medium text-sm"
                             >
                                 <Download size={16} />
                                 <span className="hidden lg:inline">Exportar</span>
@@ -717,7 +777,7 @@ export default function App() {
                                     return (
                                         <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                                             <td className="px-6 py-4 text-center">
-                                                <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-slate-700 flex items-center justify-center mx-auto text-blue-500 dark:text-blue-400">
+                                                <div className="w-8 h-8 rounded-full bg-red-50 dark:bg-slate-700 flex items-center justify-center mx-auto text-red-600 dark:text-red-400">
                                                     <FileText size={16} />
                                                 </div>
                                             </td>
@@ -765,7 +825,7 @@ export default function App() {
                         setCustomAvatar(null);
                         setIsAddingUser(!isAddingUser);
                     }}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-white font-medium transition-all shadow-md active:scale-95 ${isAddingUser ? 'bg-gray-400 hover:bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}`}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-white font-medium transition-all shadow-md active:scale-95 ${isAddingUser ? 'bg-gray-400 hover:bg-gray-500' : 'bg-red-600 hover:bg-red-700'}`}
                 >
                     {isAddingUser ? <X size={20} /> : <PlusCircle size={20} />}
                     {isAddingUser ? 'Cancelar' : 'Nuevo Usuario'}
@@ -774,13 +834,13 @@ export default function App() {
 
             {/* Add/Edit Form */}
             {isAddingUser && (
-                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-lg border border-blue-100 dark:border-slate-700 mb-8 animate-fade-in-up">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-lg border border-red-100 dark:border-slate-700 mb-8 animate-fade-in-up">
                     <h3 className="font-bold text-gray-800 dark:text-white mb-4">{editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
                     
                     <div className="flex flex-col sm:flex-row gap-6 items-start">
                         {/* Avatar Uploader */}
                         <div className="relative group shrink-0">
-                            <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-gray-300 dark:border-slate-600 group-hover:border-blue-500 transition-colors bg-gray-50 dark:bg-slate-700">
+                            <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-dashed border-gray-300 dark:border-slate-600 group-hover:border-red-500 transition-colors bg-gray-50 dark:bg-slate-700">
                                  <img 
                                     src={customAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userNameInput.trim() || 'placeholder')}`} 
                                     alt="Preview" 
@@ -799,7 +859,7 @@ export default function App() {
                                 value={userNameInput}
                                 onChange={(e) => setUserNameInput(e.target.value)}
                                 placeholder="Nombre del usuario (ej. Laura Méndez)"
-                                className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none"
+                                className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-red-100 dark:focus:ring-red-900/30 focus:border-red-500 outline-none"
                                 autoFocus
                             />
                             
@@ -830,7 +890,7 @@ export default function App() {
                 {users.map(user => {
                     const isActive = user.active !== false; // Handle legacy true/undefined
                     return (
-                        <div key={user.id} className={`relative p-4 rounded-2xl border flex items-center justify-between group transition-all hover:shadow-md ${user.id === currentUser.id ? 'bg-white dark:bg-slate-800 border-blue-500 ring-1 ring-blue-500 dark:ring-blue-600 dark:border-blue-600' : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700'} ${!isActive ? 'opacity-60 bg-gray-50 dark:bg-slate-800/50' : ''}`}>
+                        <div key={user.id} className={`relative p-4 rounded-2xl border flex items-center justify-between group transition-all hover:shadow-md ${user.id === currentUser.id ? 'bg-white dark:bg-slate-800 border-red-500 ring-1 ring-red-500 dark:ring-red-600 dark:border-red-600' : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700'} ${!isActive ? 'opacity-60 bg-gray-50 dark:bg-slate-800/50' : ''}`}>
                             <div className="flex items-center gap-4">
                                 <div className="relative">
                                     <img src={user.avatar} alt={user.name} className={`w-12 h-12 rounded-full bg-gray-100 dark:bg-slate-700 object-cover ${!isActive && 'grayscale'}`} />
@@ -839,7 +899,7 @@ export default function App() {
                                 <div>
                                     <h4 className={`font-bold ${isActive ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>{user.name}</h4>
                                     <div className="flex gap-2 items-center">
-                                        {user.id === currentUser.id && <span className="text-xs text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">Activo ahora</span>}
+                                        {user.id === currentUser.id && <span className="text-xs text-red-600 dark:text-red-400 font-medium bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full">Activo ahora</span>}
                                         {!isActive && <span className="text-xs text-gray-500 font-medium bg-gray-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">Inactivo</span>}
                                     </div>
                                 </div>
@@ -847,7 +907,7 @@ export default function App() {
                             <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                 <button 
                                     onClick={() => startEditUser(user)}
-                                    className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                    className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
                                     title="Editar nombre"
                                 >
                                     <Pencil size={18} />
@@ -873,10 +933,14 @@ export default function App() {
             <aside className="bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 w-full md:w-64 flex-shrink-0 z-20 transition-colors">
                 <div className="p-6 flex items-center justify-between border-b border-gray-100 dark:border-slate-700">
                     <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                            <TrendingUp className="text-white" size={18} />
+                        {/* Ibspot Logo Simulation */}
+                        <div className="flex items-center">
+                             <span className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">ibspot</span>
+                             <div className="relative flex items-center justify-center w-6 h-6 ml-1 mt-1">
+                                <div className="absolute inset-0 bg-red-600 rounded-full rounded-bl-none transform rotate-45"></div>
+                                <div className="absolute inset-0 bg-red-600 rounded-full rounded-bl-none transform rotate-45 animate-pulse opacity-50"></div>
+                             </div>
                         </div>
-                        <span className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Ibspot<span className="text-blue-600 dark:text-blue-400">Tracker</span></span>
                     </div>
                 </div>
                 
@@ -936,7 +1000,7 @@ export default function App() {
                                     <button
                                         key={u.id}
                                         onClick={() => handleUserChange(u.id)}
-                                        className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 ${u.id === currentUser.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}
+                                        className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 ${u.id === currentUser.id ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'}`}
                                     >
                                         <img src={u.avatar} className="w-6 h-6 rounded-full object-cover" />
                                         {u.name}
