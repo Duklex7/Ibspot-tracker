@@ -10,7 +10,8 @@ import {
     doc,
     setDoc,
     deleteDoc,
-    getDoc
+    getDoc,
+    updateDoc
 } from 'firebase/firestore';
 import { 
     getAuth, 
@@ -21,7 +22,8 @@ import {
     User as FirebaseUser,
     Auth,
     GoogleAuthProvider,
-    signInWithPopup
+    signInWithPopup,
+    updateProfile
 } from 'firebase/auth';
 
 const STORAGE_KEY_ENTRIES = 'ibspot_entries';
@@ -180,30 +182,51 @@ export const loginUser = async (email: string, pass: string) => {
         }
     }
     
-    // Offline Mode Login Mock
-    // In a real offline app, we might check a local DB of users. 
-    // Here we just allow entry to simulate "It works" for the user.
-    const mockUser: User = {
-        id: 'local-' + Date.now(),
-        name: email.split('@')[0],
-        email: email,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`,
-        active: true
-    };
-    setLocalUser(mockUser);
+    // Offline Mode Login Logic
+    // 1. Check if user already exists in our local list
+    const localUsers = getUsersLocal();
+    const existingUser = localUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+    if (existingUser) {
+        setLocalUser(existingUser);
+    } else {
+        // 2. Create new if not found
+        const mockUser: User = {
+            id: 'local-' + Date.now(),
+            name: email.split('@')[0],
+            email: email,
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`,
+            active: true
+        };
+        // Add to the public list so they appear on leaderboards immediately
+        const updatedUsers = [...localUsers, mockUser];
+        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
+        
+        setLocalUser(mockUser);
+    }
 };
 
 export const loginWithGoogle = async () => {
     if (!auth) {
-         // Force Offline Mode
-         const mockUser: User = {
-            id: 'google-local-' + Date.now(),
-            name: 'Usuario Google (Local)',
-            email: 'google@local.com',
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=Google`,
-            active: true
-        };
-        setLocalUser(mockUser);
+         // Force Offline Mode with "Smart" Check
+         const email = 'google@local.com';
+         const localUsers = getUsersLocal();
+         const existingUser = localUsers.find(u => u.email === email);
+
+         if (existingUser) {
+             setLocalUser(existingUser);
+         } else {
+            const mockUser: User = {
+                id: 'google-local-' + Date.now(),
+                name: 'Usuario Google (Local)',
+                email: email,
+                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=Google`,
+                active: true
+            };
+            const updatedUsers = [...localUsers, mockUser];
+            localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
+            setLocalUser(mockUser);
+         }
         return;
     }
 
@@ -232,18 +255,28 @@ export const loginWithGoogle = async () => {
     } catch (error: any) {
         console.error("Google Login Error", error);
         
-        // CRITICAL FIX: Handle "Unauthorized Domain" by falling back to Local Mode
         if (error.code === 'auth/unauthorized-domain' || error.code === 'auth/operation-not-allowed') {
             console.warn("Domain not authorized in Firebase. Switching to Local Demo Mode.");
-            const mockUser: User = {
-                id: 'google-local-fallback',
-                name: 'Usuario Demo (Local)',
-                email: 'demo@ibspot.local',
-                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=Demo`,
-                active: true
-            };
-            setLocalUser(mockUser);
-            // We return successfully so the UI proceeds
+            
+            // Fallback Logic
+            const email = 'demo@ibspot.local';
+            const localUsers = getUsersLocal();
+            const existingUser = localUsers.find(u => u.email === email);
+            
+            if (existingUser) {
+                setLocalUser(existingUser);
+            } else {
+                const mockUser: User = {
+                    id: 'google-local-fallback',
+                    name: 'Usuario Demo (Local)',
+                    email: email,
+                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=Demo`,
+                    active: true
+                };
+                const updatedUsers = [...localUsers, mockUser];
+                localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
+                setLocalUser(mockUser);
+            }
             return;
         }
         throw error;
@@ -275,8 +308,6 @@ export const registerUser = async (email: string, pass: string, name: string, av
             return newUser;
         } catch (e: any) {
             console.error("Cloud registration failed:", e);
-            // If it's a network error, maybe fall back? 
-            // Usually we want to show the error (like 'email in use').
             throw e;
         }
     } else {
@@ -288,8 +319,39 @@ export const registerUser = async (email: string, pass: string, name: string, av
             avatar: avatarDataUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
             active: true
         };
+        // Update global list
+        const localUsers = getUsersLocal();
+        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify([...localUsers, newUser]));
+        
         setLocalUser(newUser);
         return newUser;
+    }
+};
+
+export const updateUserProfile = async (userId: string, updates: Partial<User>) => {
+    // 1. Update Local Session
+    const currentUser = getLocalUser();
+    if (currentUser && currentUser.id === userId) {
+        const updated = { ...currentUser, ...updates };
+        setLocalUser(updated);
+    }
+
+    // 2. Update Local Global List (so leaderboards update)
+    const localUsers = getUsersLocal();
+    const updatedUsers = localUsers.map(u => u.id === userId ? { ...u, ...updates } : u);
+    localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(updatedUsers));
+
+    // 3. Update Cloud (if available)
+    if (isCloudEnabled && db && auth && auth.currentUser) {
+        try {
+            await updateDoc(doc(db, "users", userId), updates);
+            // Also update Auth profile if name changed
+            if (updates.name) {
+                await updateProfile(auth.currentUser, { displayName: updates.name });
+            }
+        } catch (e) {
+            console.error("Error updating cloud profile:", e);
+        }
     }
 };
 

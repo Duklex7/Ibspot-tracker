@@ -40,7 +40,8 @@ import {
     Mail,
     Lock,
     User as UserIcon,
-    Loader2
+    Loader2,
+    Edit3
 } from 'lucide-react';
 import { ActivityChart, ComparisonChart } from './components/DashboardCharts';
 import { User, IsinEntry, TimeFrame } from './types';
@@ -89,6 +90,60 @@ const GoogleIcon = () => (
         <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
     </svg>
 );
+
+const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () => void, onSave: (u: Partial<User>) => void }) => {
+    const [name, setName] = useState(user.name);
+    const [avatar, setAvatar] = useState(user.avatar);
+
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => setAvatar(reader.result as string);
+            reader.readAsDataURL(file);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm p-6 border border-gray-100 dark:border-slate-700">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold dark:text-white">Editar Perfil</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20}/></button>
+                </div>
+                
+                <div className="flex justify-center mb-6">
+                    <div className="relative group cursor-pointer">
+                        <div className="w-24 h-24 rounded-full overflow-hidden bg-gray-100 dark:bg-slate-700 border-2 border-dashed border-gray-300 dark:border-slate-600 flex items-center justify-center">
+                            <img src={avatar} className="w-full h-full object-cover" alt="Profile" />
+                        </div>
+                        <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
+                        <div className="absolute bottom-0 right-0 bg-red-600 p-1.5 rounded-full text-white shadow-sm pointer-events-none">
+                            <Pencil size={12} />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nombre</label>
+                        <input 
+                            type="text" 
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
+                        />
+                    </div>
+                </div>
+
+                <div className="mt-8 flex gap-3">
+                    <button onClick={onClose} className="flex-1 py-3 text-gray-500 font-medium hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl transition-colors">Cancelar</button>
+                    <button onClick={() => onSave({ name, avatar })} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg hover:bg-red-700 transition-colors">Guardar</button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
     const [isRegistering, setIsRegistering] = useState(false);
@@ -339,6 +394,7 @@ export default function App() {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [authLoading, setAuthLoading] = useState(true);
     const [timeFrame, setTimeFrame] = useState<TimeFrame>('day');
+    const [showProfileModal, setShowProfileModal] = useState(false);
     
     // Cloud Config State
     const [isCloudConnected, setIsCloudConnected] = useState(false);
@@ -414,6 +470,13 @@ export default function App() {
     const handleLogout = async () => {
         if (confirm("¿Cerrar sesión?")) {
             await storage.logoutUser();
+        }
+    };
+
+    const handleUpdateProfile = (updates: Partial<User>) => {
+        if (currentUser) {
+            storage.updateUserProfile(currentUser.id, updates);
+            setShowProfileModal(false);
         }
     };
 
@@ -971,6 +1034,15 @@ export default function App() {
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white font-sans transition-colors duration-200">
+            {/* Modal */}
+            {showProfileModal && currentUser && (
+                <EditProfileModal 
+                    user={currentUser} 
+                    onClose={() => setShowProfileModal(false)} 
+                    onSave={handleUpdateProfile} 
+                />
+            )}
+
             {/* Mobile Header */}
             <header className="md:hidden bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 p-4 flex items-center justify-between sticky top-0 z-20">
                 <div className="flex items-center gap-2">
@@ -981,7 +1053,9 @@ export default function App() {
                      <button onClick={toggleTheme} className="p-2 text-gray-500 dark:text-gray-400">
                         {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
                     </button>
-                    <img src={currentUser.avatar} alt="Profile" className="w-8 h-8 rounded-full border border-gray-200" />
+                    <button onClick={() => setShowProfileModal(true)}>
+                        <img src={currentUser.avatar} alt="Profile" className="w-8 h-8 rounded-full border border-gray-200" />
+                    </button>
                 </div>
             </header>
 
@@ -1014,12 +1088,19 @@ export default function App() {
                     </nav>
 
                     <div className="p-4 border-t border-gray-100 dark:border-slate-700">
-                         <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3 flex items-center gap-3 mb-3" title="Usuario actual">
+                         <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3 flex items-center gap-3 mb-3 relative group">
                             <img src={currentUser.avatar} alt={currentUser.name} className="w-10 h-10 rounded-full border border-white dark:border-slate-600 object-cover" />
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{currentUser.name}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{currentUser.email}</p>
                             </div>
+                            <button 
+                                onClick={() => setShowProfileModal(true)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-white dark:bg-slate-600 rounded-lg shadow-sm text-gray-500 dark:text-white hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Editar Perfil"
+                            >
+                                <Settings size={14} />
+                            </button>
                         </div>
                         <div className="flex gap-2">
                              <button onClick={toggleTheme} className="flex-1 py-2 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
