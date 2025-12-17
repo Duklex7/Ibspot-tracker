@@ -467,14 +467,40 @@ export default function App() {
 
     const handleSaveCloudConfig = () => {
         try {
-            const config = JSON.parse(firebaseConfigInput);
+            let input = firebaseConfigInput.trim();
+            
+            // Remove "const firebaseConfig =" wrapper if present
+            if (input.includes('=')) {
+                input = input.split('=')[1].trim();
+            }
+            
+            // Remove trailing semicolon
+            if (input.endsWith(';')) {
+                input = input.slice(0, -1).trim();
+            }
+
+            // Relaxed JSON parsing
+            const jsonLike = input
+                .replace(/\/\/.*$/gm, '') // Remove comments
+                .replace(/(\w+)\s*:/g, '"$1":') // Quote keys
+                .replace(/'/g, '"') // Replace single quotes with double quotes
+                .replace(/,(\s*})/g, '$1'); // Remove trailing commas
+
+            const config = JSON.parse(jsonLike);
+            
+            // Validation
+            if (!config.apiKey || !config.projectId) {
+                throw new Error("Configuración incompleta");
+            }
+
             storage.saveFirebaseConfig(config);
             setIsCloudConnected(true);
             setView('dashboard');
-            alert("Conexión guardada. Ahora los datos se sincronizarán.");
-            window.location.reload(); // Quickest way to re-init everything cleanly
+            alert("¡Conexión establecida con éxito! La página se recargará para aplicar los cambios.");
+            window.location.reload(); 
         } catch (e) {
-            alert("Error: El formato JSON no es válido.");
+            console.error(e);
+            alert("Error al interpretar el código. \n\nIntenta copiar SOLO lo que está entre las llaves { ... }, o asegúrate de que el formato sea correcto.");
         }
     };
 
@@ -589,17 +615,17 @@ export default function App() {
                             <ol className="list-decimal ml-5 mt-2 space-y-1">
                                 <li>Ve a <a href="https://console.firebase.google.com" target="_blank" className="underline">console.firebase.google.com</a> y crea un proyecto.</li>
                                 <li>Crea una base de datos <strong>Firestore</strong> (en modo prueba o producción).</li>
-                                <li>Ve a Configuración del Proyecto y copia la configuración del SDK (JSON).</li>
-                                <li>Pégala abajo.</li>
+                                <li>Ve a Configuración del Proyecto y copia la configuración del SDK.</li>
+                                <li>Pégala abajo (acepta el formato con "const" y sin comillas en las claves).</li>
                             </ol>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Configuración Firebase (JSON)</label>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Configuración Firebase</label>
                             <textarea
                                 value={firebaseConfigInput}
                                 onChange={(e) => setFirebaseConfigInput(e.target.value)}
-                                placeholder='{ "apiKey": "AIza...", "authDomain": "...", "projectId": "..." }'
+                                placeholder='Pega aquí el código que copiaste de Firebase (ej: const firebaseConfig = { ... })'
                                 className="w-full h-40 p-4 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
                             ></textarea>
                         </div>
