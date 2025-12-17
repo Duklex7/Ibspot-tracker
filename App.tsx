@@ -16,7 +16,11 @@ import {
     UserCog,
     Trash2,
     Pencil,
-    Save
+    Save,
+    Search,
+    Filter,
+    Moon,
+    Sun
 } from 'lucide-react';
 import { ActivityChart } from './components/DashboardCharts';
 import { DEFAULT_USERS, User, IsinEntry, TimeFrame } from './types';
@@ -62,8 +66,8 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
         onClick={onClick}
         className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${
             active 
-            ? 'bg-blue-50 text-blue-600 font-medium' 
-            : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium' 
+            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-gray-900 dark:hover:text-white'
         }`}
     >
         <Icon size={20} strokeWidth={active ? 2.5 : 2} />
@@ -72,17 +76,21 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
 );
 
 const StatCard = ({ label, value, subtext, icon: Icon, highlight = false }: any) => (
-    <div className={`p-6 rounded-2xl border ${highlight ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white border-gray-100 shadow-sm'}`}>
+    <div className={`p-6 rounded-2xl border transition-colors ${
+        highlight 
+        ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none' 
+        : 'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 shadow-sm'
+    }`}>
         <div className="flex justify-between items-start mb-4">
             <div>
-                <p className={`text-sm font-medium ${highlight ? 'text-blue-100' : 'text-gray-500'}`}>{label}</p>
-                <h3 className="text-3xl font-bold mt-1">{value}</h3>
+                <p className={`text-sm font-medium ${highlight ? 'text-blue-100' : 'text-gray-500 dark:text-gray-400'}`}>{label}</p>
+                <h3 className={`text-3xl font-bold mt-1 ${!highlight && 'text-gray-900 dark:text-white'}`}>{value}</h3>
             </div>
-            <div className={`p-2 rounded-lg ${highlight ? 'bg-white/20' : 'bg-gray-50'}`}>
-                <Icon size={20} className={highlight ? 'text-white' : 'text-gray-400'} />
+            <div className={`p-2 rounded-lg ${highlight ? 'bg-white/20' : 'bg-gray-50 dark:bg-slate-700'}`}>
+                <Icon size={20} className={highlight ? 'text-white' : 'text-gray-400 dark:text-gray-300'} />
             </div>
         </div>
-        {subtext && <p className={`text-sm ${highlight ? 'text-blue-200' : 'text-green-600'} flex items-center`}>
+        {subtext && <p className={`text-sm ${highlight ? 'text-blue-200' : 'text-green-600 dark:text-green-400'} flex items-center`}>
             {subtext}
         </p>}
     </div>
@@ -97,6 +105,15 @@ export default function App() {
     const [currentUser, setCurrentUser] = useState<User>(DEFAULT_USERS[0]);
     const [timeFrame, setTimeFrame] = useState<TimeFrame>('day');
     
+    // Theme State
+    const [isDarkMode, setIsDarkMode] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('theme') === 'dark' || 
+                   (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        }
+        return false;
+    });
+
     // Form State
     const [isinInput, setIsinInput] = useState('');
     const [entryStatus, setEntryStatus] = useState<'idle' | 'success' | 'error'>('idle');
@@ -111,6 +128,10 @@ export default function App() {
     const [userNameInput, setUserNameInput] = useState('');
     const [isAddingUser, setIsAddingUser] = useState(false);
 
+    // History Filter State
+    const [historySearchIsin, setHistorySearchIsin] = useState('');
+    const [historyUserFilter, setHistoryUserFilter] = useState('');
+
     // Load data
     useEffect(() => {
         setEntries(storage.getEntries());
@@ -122,6 +143,20 @@ export default function App() {
         const validUser = loadedUsers.find(u => u.id === savedUser.id) || loadedUsers[0];
         setCurrentUser(validUser);
     }, []);
+
+    // Theme Effect
+    useEffect(() => {
+        const root = window.document.documentElement;
+        if (isDarkMode) {
+            root.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            root.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+        }
+    }, [isDarkMode]);
+
+    const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
     // Change User
     const handleUserChange = (userId: string) => {
@@ -267,11 +302,12 @@ export default function App() {
         setIsGeneratingAi(false);
     };
 
-    const handleExportCsv = () => {
-        if (entries.length === 0) return;
+    // Update handleExportCsv to accept data parameter
+    const handleExportCsv = (dataToExport: IsinEntry[] = entries) => {
+        if (dataToExport.length === 0) return;
 
         const headers = ['Fecha', 'Hora', 'ISIN', 'Usuario', 'ID Usuario'];
-        const rows = entries.map(entry => {
+        const rows = dataToExport.map(entry => {
             const date = new Date(entry.timestamp);
             const user = users.find(u => u.id === entry.userId);
             return [
@@ -300,15 +336,15 @@ export default function App() {
 
     const renderEntryView = () => (
         <div className="max-w-xl mx-auto mt-10">
-            <div className="bg-white rounded-3xl shadow-xl p-8 border border-gray-100">
+            <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl p-8 border border-gray-100 dark:border-slate-700 transition-colors">
                 <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold text-gray-900">Registrar Producto</h2>
-                    <p className="text-gray-500 mt-2">Ingresa el código ISIN del producto subido a Ibspot.</p>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Registrar Producto</h2>
+                    <p className="text-gray-500 dark:text-gray-400 mt-2">Ingresa el código ISIN del producto subido a Ibspot.</p>
                 </div>
 
                 <form onSubmit={handleAddEntry} className="space-y-6">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2 ml-1">Código ISIN</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 ml-1">Código ISIN</label>
                         <div className="relative">
                             <input
                                 type="text"
@@ -321,7 +357,7 @@ export default function App() {
                                 className={`block w-full text-center text-3xl font-mono p-4 rounded-xl border-2 focus:ring-4 focus:outline-none transition-all uppercase tracking-wider
                                     ${entryStatus === 'error' ? 'border-red-300 focus:border-red-500 focus:ring-red-100 bg-red-50 text-red-900' : 
                                       entryStatus === 'success' ? 'border-green-300 focus:border-green-500 focus:ring-green-100 bg-green-50' : 
-                                      'border-gray-200 focus:border-blue-500 focus:ring-blue-100 bg-gray-50'}`}
+                                      'border-gray-200 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-100 dark:focus:ring-blue-900 bg-gray-50 dark:bg-slate-900 text-slate-800 dark:text-white'}`}
                                 autoFocus
                             />
                         </div>
@@ -335,7 +371,7 @@ export default function App() {
                     <button
                         type="submit"
                         disabled={!isinInput}
-                        className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-lg font-semibold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                        className="w-full bg-slate-900 dark:bg-blue-600 hover:bg-slate-800 dark:hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-lg font-semibold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                     >
                         <PlusCircle size={24} />
                         <span>Registrar Ahora</span>
@@ -343,20 +379,20 @@ export default function App() {
                 </form>
 
                 {entryStatus === 'success' && (
-                    <div className="mt-8 p-4 bg-green-50 rounded-2xl flex items-center justify-center gap-3 animate-fade-in-up">
-                        <div className="bg-green-100 p-2 rounded-full">
-                            <CheckCircle2 className="text-green-600" size={24} />
+                    <div className="mt-8 p-4 bg-green-50 dark:bg-green-900/20 rounded-2xl flex items-center justify-center gap-3 animate-fade-in-up">
+                        <div className="bg-green-100 dark:bg-green-900/50 p-2 rounded-full">
+                            <CheckCircle2 className="text-green-600 dark:text-green-400" size={24} />
                         </div>
                         <div>
-                            <p className="text-green-800 font-medium">¡Registrado con éxito!</p>
-                            <p className="text-green-600 text-sm">ISIN: {lastAdded}</p>
+                            <p className="text-green-800 dark:text-green-300 font-medium">¡Registrado con éxito!</p>
+                            <p className="text-green-600 dark:text-green-400 text-sm">ISIN: {lastAdded}</p>
                         </div>
                     </div>
                 )}
             </div>
 
-            <div className="mt-8 text-center text-sm text-gray-400">
-                <p>Estás registrando como <span className="font-semibold text-gray-600">{currentUser.name}</span></p>
+            <div className="mt-8 text-center text-sm text-gray-400 dark:text-gray-500">
+                <p>Estás registrando como <span className="font-semibold text-gray-600 dark:text-gray-300">{currentUser.name}</span></p>
             </div>
         </div>
     );
@@ -366,10 +402,10 @@ export default function App() {
             {/* Header Controls */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Panel de Control</h2>
-                    <p className="text-gray-500">Rendimiento y contabilidad</p>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Panel de Control</h2>
+                    <p className="text-gray-500 dark:text-gray-400">Rendimiento y contabilidad</p>
                 </div>
-                <div className="bg-white p-1 rounded-lg border border-gray-200 inline-flex shadow-sm overflow-x-auto max-w-full">
+                <div className="bg-white dark:bg-slate-800 p-1 rounded-lg border border-gray-200 dark:border-slate-700 inline-flex shadow-sm overflow-x-auto max-w-full">
                     {(['day', 'week', 'month', 'year'] as TimeFrame[]).map((tf) => (
                         <button
                             key={tf}
@@ -379,8 +415,8 @@ export default function App() {
                             }}
                             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                                 timeFrame === tf 
-                                ? 'bg-slate-900 text-white shadow-sm' 
-                                : 'text-gray-600 hover:bg-gray-50'
+                                ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-sm' 
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700'
                             }`}
                         >
                             {tf === 'day' ? 'Hoy' : 
@@ -393,17 +429,17 @@ export default function App() {
 
             {/* AI Insight */}
             {aiInsight ? (
-                <div className="bg-gradient-to-r from-indigo-50 to-blue-50 p-6 rounded-2xl border border-blue-100 relative">
-                    <button onClick={() => setAiInsight(null)} className="absolute top-4 right-4 text-blue-400 hover:text-blue-700">
+                <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 dark:border-slate-600 p-6 rounded-2xl border border-blue-100 relative">
+                    <button onClick={() => setAiInsight(null)} className="absolute top-4 right-4 text-blue-400 hover:text-blue-700 dark:text-slate-400 dark:hover:text-white">
                         <X size={18} />
                     </button>
                     <div className="flex items-start gap-4">
-                        <div className="bg-white p-2 rounded-full shadow-sm">
-                            <Sparkles className="text-indigo-500" size={20} />
+                        <div className="bg-white dark:bg-slate-700 p-2 rounded-full shadow-sm">
+                            <Sparkles className="text-indigo-500 dark:text-indigo-400" size={20} />
                         </div>
                         <div>
-                            <h4 className="font-semibold text-indigo-900 text-sm mb-1">Análisis IA</h4>
-                            <p className="text-indigo-800 leading-relaxed text-sm md:text-base">"{aiInsight}"</p>
+                            <h4 className="font-semibold text-indigo-900 dark:text-indigo-300 text-sm mb-1">Análisis IA</h4>
+                            <p className="text-indigo-800 dark:text-slate-300 leading-relaxed text-sm md:text-base">"{aiInsight}"</p>
                         </div>
                     </div>
                 </div>
@@ -412,7 +448,7 @@ export default function App() {
                      <button 
                         onClick={handleGenerateInsight}
                         disabled={isGeneratingAi}
-                        className="text-xs flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 transition-colors disabled:opacity-50"
+                        className="text-xs flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors disabled:opacity-50"
                     >
                         <Sparkles size={14} />
                         {isGeneratingAi ? 'Analizando...' : 'Generar reporte inteligente'}
@@ -446,14 +482,14 @@ export default function App() {
             {/* Main Content Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Chart Section */}
-                <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-                    <h3 className="font-bold text-gray-800 mb-6">Tendencia de Cargas</h3>
-                    <ActivityChart data={chartData} />
+                <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
+                    <h3 className="font-bold text-gray-800 dark:text-white mb-6">Tendencia de Cargas</h3>
+                    <ActivityChart data={chartData} isDarkMode={isDarkMode} />
                 </div>
 
                 {/* Leaderboard Section */}
-                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-                    <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
+                <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm transition-colors">
+                    <h3 className="font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
                         <Users size={18} className="text-blue-500"/> Ranking
                     </h3>
                     <div className="space-y-4">
@@ -466,19 +502,19 @@ export default function App() {
                                         <div className={`
                                             w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold
                                             ${idx === 0 ? 'bg-yellow-100 text-yellow-700' : 
-                                              idx === 1 ? 'bg-gray-100 text-gray-700' : 
-                                              idx === 2 ? 'bg-orange-100 text-orange-800' : 'bg-white text-gray-400 border border-gray-100'}
+                                              idx === 1 ? 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300' : 
+                                              idx === 2 ? 'bg-orange-100 text-orange-800' : 'bg-white dark:bg-slate-700 text-gray-400 border border-gray-100 dark:border-slate-600'}
                                         `}>
                                             {idx + 1}
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <img src={item.user?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Unknown'} alt={item.user?.name} className="w-8 h-8 rounded-full bg-gray-200 object-cover" />
-                                            <span className={`text-sm font-medium ${idx === 0 ? 'text-gray-900' : 'text-gray-600'}`}>
+                                            <img src={item.user?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Unknown'} alt={item.user?.name} className="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-700 object-cover" />
+                                            <span className={`text-sm font-medium ${idx === 0 ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300'}`}>
                                                 {item.user?.name || 'Desconocido'}
                                             </span>
                                         </div>
                                     </div>
-                                    <span className="text-sm font-bold text-slate-700 bg-slate-50 px-2 py-1 rounded-md">
+                                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-700 px-2 py-1 rounded-md">
                                         {item.count}
                                     </span>
                                 </div>
@@ -490,73 +526,118 @@ export default function App() {
         </div>
     );
 
-    const renderHistory = () => (
-        <div className="max-w-4xl mx-auto">
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Historial Completo</h2>
-                <button
-                    onClick={handleExportCsv}
-                    disabled={entries.length === 0}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm font-medium text-sm"
-                >
-                    <Download size={16} />
-                    Exportar CSV
-                </button>
-            </div>
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                <table className="w-full text-left">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hora/Fecha</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">ISIN</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Usuario</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {entries.length === 0 ? (
+    const renderHistory = () => {
+        // Filter logic inside render to keep state responsive
+        const filteredHistory = entries.filter(entry => {
+            const matchesIsin = entry.isin.toLowerCase().includes(historySearchIsin.toLowerCase());
+            const matchesUser = historyUserFilter ? entry.userId === historyUserFilter : true;
+            return matchesIsin && matchesUser;
+        });
+
+        const isFiltering = historySearchIsin || historyUserFilter;
+
+        return (
+            <div className="max-w-4xl mx-auto">
+                <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Historial</h2>
+                    
+                    {/* Filters and Actions */}
+                    <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                        <div className="relative flex-1 md:w-48">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                            <input
+                                type="text"
+                                placeholder="Buscar ISIN..."
+                                value={historySearchIsin}
+                                onChange={(e) => setHistorySearchIsin(e.target.value)}
+                                className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none text-slate-800 dark:text-white"
+                            />
+                        </div>
+                        
+                        <div className="relative flex-1 md:w-48">
+                            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                            <select
+                                value={historyUserFilter}
+                                onChange={(e) => setHistoryUserFilter(e.target.value)}
+                                className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none appearance-none cursor-pointer text-slate-800 dark:text-white"
+                            >
+                                <option value="">Todos los usuarios</option>
+                                {users.map(u => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <button
+                            onClick={() => handleExportCsv(filteredHistory)}
+                            disabled={filteredHistory.length === 0}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 dark:bg-blue-600 text-white rounded-xl hover:bg-slate-700 dark:hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm font-medium text-sm"
+                        >
+                            <Download size={16} />
+                            <span className="md:hidden lg:inline">Exportar</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-sm overflow-hidden transition-colors">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-50 dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700">
                             <tr>
-                                <td colSpan={3} className="px-6 py-8 text-center text-gray-400">
-                                    No hay registros todavía.
-                                </td>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Hora/Fecha</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ISIN</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Usuario</th>
                             </tr>
-                        ) : (
-                            entries.slice(0, 50).map((entry) => { 
-                                const user = users.find(u => u.id === entry.userId);
-                                return (
-                                    <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="px-6 py-4 text-sm text-gray-600">
-                                            {new Date(entry.timestamp).toLocaleString('es-ES')}
-                                        </td>
-                                        <td className="px-6 py-4 text-sm font-mono font-medium text-slate-800">
-                                            {entry.isin}
-                                        </td>
-                                        <td className="px-6 py-4 text-sm text-gray-600 flex items-center gap-2">
-                                            {user ? (
-                                                <img src={user.avatar} className="w-5 h-5 rounded-full" alt="" />
-                                            ) : (
-                                                <div className="w-5 h-5 rounded-full bg-gray-200"></div>
-                                            )}
-                                            {user?.name || 'Usuario Eliminado'}
-                                        </td>
-                                    </tr>
-                                );
-                            })
-                        )}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                            {filteredHistory.length === 0 ? (
+                                <tr>
+                                    <td colSpan={3} className="px-6 py-8 text-center text-gray-400">
+                                        {isFiltering 
+                                            ? "No se encontraron resultados para los filtros aplicados." 
+                                            : "No hay registros todavía."}
+                                    </td>
+                                </tr>
+                            ) : (
+                                filteredHistory.slice(0, 50).map((entry) => { 
+                                    const user = users.find(u => u.id === entry.userId);
+                                    return (
+                                        <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                                            <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300">
+                                                {new Date(entry.timestamp).toLocaleString('es-ES')}
+                                            </td>
+                                            <td className="px-6 py-4 text-sm font-mono font-medium text-slate-800 dark:text-slate-200">
+                                                {entry.isin}
+                                            </td>
+                                            <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                                                {user ? (
+                                                    <img src={user.avatar} className="w-5 h-5 rounded-full" alt="" />
+                                                ) : (
+                                                    <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-slate-600"></div>
+                                                )}
+                                                {user?.name || 'Usuario Eliminado'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+                {filteredHistory.length > 50 && (
+                    <p className="text-center text-gray-400 text-sm mt-4">
+                        Mostrando los últimos 50 de {filteredHistory.length} resultados encontrados.
+                    </p>
+                )}
             </div>
-            {entries.length > 50 && (
-                <p className="text-center text-gray-400 text-sm mt-4">Mostrando los últimos 50 registros.</p>
-            )}
-        </div>
-    );
+        );
+    };
 
     const renderUsersView = () => (
         <div className="max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-8">
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Gestión de Usuarios</h2>
-                    <p className="text-gray-500 mt-1">Añade o modifica los miembros del equipo.</p>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Gestión de Usuarios</h2>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">Añade o modifica los miembros del equipo.</p>
                 </div>
                 <button 
                     onClick={() => {
@@ -573,15 +654,15 @@ export default function App() {
 
             {/* Add/Edit Form */}
             {isAddingUser && (
-                <div className="bg-white rounded-2xl p-6 shadow-lg border border-blue-100 mb-8 animate-fade-in-up">
-                    <h3 className="font-bold text-gray-800 mb-4">{editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-lg border border-blue-100 dark:border-slate-700 mb-8 animate-fade-in-up">
+                    <h3 className="font-bold text-gray-800 dark:text-white mb-4">{editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
                     <div className="flex gap-3">
                         <input 
                             type="text" 
                             value={userNameInput}
                             onChange={(e) => setUserNameInput(e.target.value)}
                             placeholder="Nombre del usuario (ej. Laura Méndez)"
-                            className="flex-1 p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none"
+                            className="flex-1 p-3 rounded-xl border border-gray-200 dark:border-slate-600 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 outline-none"
                             autoFocus
                         />
                         <button 
@@ -597,25 +678,25 @@ export default function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {users.map(user => (
-                    <div key={user.id} className={`p-4 rounded-2xl border bg-white flex items-center justify-between group transition-all hover:shadow-md ${user.id === currentUser.id ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200'}`}>
+                    <div key={user.id} className={`p-4 rounded-2xl border bg-white dark:bg-slate-800 flex items-center justify-between group transition-all hover:shadow-md ${user.id === currentUser.id ? 'border-blue-500 ring-1 ring-blue-500 dark:ring-blue-600 dark:border-blue-600' : 'border-gray-200 dark:border-slate-700'}`}>
                         <div className="flex items-center gap-4">
-                            <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-full bg-gray-100 object-cover" />
+                            <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-full bg-gray-100 dark:bg-slate-700 object-cover" />
                             <div>
-                                <h4 className="font-bold text-gray-900">{user.name}</h4>
-                                {user.id === currentUser.id && <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">Activo ahora</span>}
+                                <h4 className="font-bold text-gray-900 dark:text-white">{user.name}</h4>
+                                {user.id === currentUser.id && <span className="text-xs text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full">Activo ahora</span>}
                             </div>
                         </div>
                         <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                             <button 
                                 onClick={() => startEditUser(user)}
-                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
                                 title="Editar nombre"
                             >
                                 <Pencil size={18} />
                             </button>
                             <button 
                                 onClick={() => handleDeleteUser(user.id)}
-                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-slate-700 rounded-lg transition-colors"
                                 title="Eliminar usuario"
                             >
                                 <Trash2 size={18} />
@@ -628,14 +709,16 @@ export default function App() {
     );
 
     return (
-        <div className="min-h-screen flex flex-col md:flex-row bg-gray-50">
+        <div className="min-h-screen flex flex-col md:flex-row bg-gray-50 dark:bg-slate-900 transition-colors duration-200">
             {/* Sidebar */}
-            <aside className="bg-white border-r border-gray-200 w-full md:w-64 flex-shrink-0 z-20">
-                <div className="p-6 flex items-center gap-2 border-b border-gray-100">
-                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                        <TrendingUp className="text-white" size={18} />
+            <aside className="bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 w-full md:w-64 flex-shrink-0 z-20 transition-colors">
+                <div className="p-6 flex items-center justify-between border-b border-gray-100 dark:border-slate-700">
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                            <TrendingUp className="text-white" size={18} />
+                        </div>
+                        <span className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Ibspot<span className="text-blue-600 dark:text-blue-400">Tracker</span></span>
                     </div>
-                    <span className="text-xl font-bold text-gray-900 tracking-tight">Ibspot<span className="text-blue-600">Tracker</span></span>
                 </div>
                 
                 <div className="p-4 space-y-1">
@@ -665,29 +748,42 @@ export default function App() {
                     />
                 </div>
 
-                <div className="p-4 mt-auto border-t border-gray-100">
-                    <p className="px-4 text-xs font-semibold text-gray-400 uppercase mb-3">Usuario Actual</p>
-                    <div className="relative group">
-                        <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors text-left">
-                            <img src={currentUser.avatar} alt={currentUser.name} className="w-9 h-9 rounded-full border border-gray-200 object-cover" />
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">{currentUser.name}</p>
-                                <p className="text-xs text-gray-500">Cambiar usuario</p>
-                            </div>
+                <div className="mt-auto border-t border-gray-100 dark:border-slate-700">
+                    {/* Dark Mode Toggle */}
+                    <div className="px-4 py-3 border-b border-gray-100 dark:border-slate-700 flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Tema</span>
+                        <button 
+                            onClick={toggleTheme}
+                            className="p-2 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+                        >
+                            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
                         </button>
-                        
-                        {/* User Dropdown (Simplified for demo: shown on hover/focus within group) */}
-                        <div className="hidden group-hover:block absolute bottom-full left-0 w-full bg-white border border-gray-200 rounded-xl shadow-xl mb-2 overflow-hidden z-50">
-                            {users.map(u => (
-                                <button
-                                    key={u.id}
-                                    onClick={() => handleUserChange(u.id)}
-                                    className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 flex items-center gap-2 ${u.id === currentUser.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
-                                >
-                                    <img src={u.avatar} className="w-6 h-6 rounded-full" />
-                                    {u.name}
-                                </button>
-                            ))}
+                    </div>
+
+                    <div className="p-4">
+                        <p className="px-4 text-xs font-semibold text-gray-400 uppercase mb-3">Usuario Actual</p>
+                        <div className="relative group">
+                            <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors text-left">
+                                <img src={currentUser.avatar} alt={currentUser.name} className="w-9 h-9 rounded-full border border-gray-200 dark:border-slate-600 object-cover" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{currentUser.name}</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">Cambiar usuario</p>
+                                </div>
+                            </button>
+                            
+                            {/* User Dropdown */}
+                            <div className="hidden group-hover:block absolute bottom-full left-0 w-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-xl mb-2 overflow-hidden z-50">
+                                {users.map(u => (
+                                    <button
+                                        key={u.id}
+                                        onClick={() => handleUserChange(u.id)}
+                                        className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 ${u.id === currentUser.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'}`}
+                                    >
+                                        <img src={u.avatar} className="w-6 h-6 rounded-full" />
+                                        {u.name}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
