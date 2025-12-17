@@ -38,7 +38,6 @@ let isCloudEnabled = false;
 // --- Initialization ---
 
 export const getFirebaseConfig = (): FirebaseConfig | null => {
-    // Primero intenta leer configuración manual local, si no, usa la compartida
     const raw = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
     return raw ? JSON.parse(raw) : SHARED_CONFIG;
 };
@@ -49,7 +48,6 @@ export const saveFirebaseConfig = (config: FirebaseConfig) => {
 };
 
 export const clearFirebaseConfig = () => {
-    // Al borrar la config, recaerá en la SHARED_CONFIG en la próxima recarga
     localStorage.removeItem(STORAGE_KEY_FIREBASE_CONFIG);
     firebaseApp = null;
     db = null;
@@ -67,12 +65,10 @@ export const initializeCloud = (config: FirebaseConfig) => {
         }
     } catch (e) {
         console.error("Error connecting to cloud:", e);
-        // Si falla la compartida, no marcamos cloud como enabled
         isCloudEnabled = false;
     }
 };
 
-// Auto-init on load
 const configToLoad = getFirebaseConfig();
 if (configToLoad) {
     initializeCloud(configToLoad);
@@ -91,7 +87,6 @@ export const subscribeToEntries = (callback: (entries: IsinEntry[]) => void) => 
         snapshot.forEach((doc) => {
             entries.push({ ...doc.data(), id: doc.id } as IsinEntry);
         });
-        // Cache for offline viewing
         localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(entries));
         callback(entries);
     }, (error) => {
@@ -118,30 +113,25 @@ export const subscribeToUsers = (callback: (users: User[]) => void) => {
 // --- Entries ---
 
 export const saveEntry = async (entry: IsinEntry): Promise<void> => {
-    // 1. Save Local (Optimistic UI)
     const existing = getEntriesLocal();
     const updated = [entry, ...existing];
     localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
 
-    // 2. Save Cloud if enabled
     if (isCloudEnabled && db) {
         try {
             const { id, ...data } = entry;
             await setDoc(doc(db, "entries", id), data);
         } catch (e) {
             console.error("Error saving to cloud", e);
-            alert("Error guardando en la nube. Verifique conexión.");
         }
     }
 };
 
 export const deleteEntry = async (id: string): Promise<void> => {
-    // 1. Local
     const existing = getEntriesLocal();
     const updated = existing.filter(e => e.id !== id);
     localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
 
-    // 2. Cloud
     if (isCloudEnabled && db) {
         try {
             await deleteDoc(doc(db, "entries", id));
@@ -185,10 +175,8 @@ export const getUsers = (): User[] => {
 };
 
 export const saveUsers = async (users: User[]): Promise<void> => {
-    // Local
     localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
 
-    // Cloud
     if (isCloudEnabled && db) {
         try {
             for (const user of users) {
@@ -217,18 +205,20 @@ export const clearData = (): void => {
 }
 
 // --- Migration Tool ---
-export const syncLocalToCloud = async () => {
+export const syncLocalToCloud = async (silent: boolean = false) => {
     if (!isCloudEnabled || !db) return;
 
     const localEntries = getEntriesLocal();
     const localUsers = getUsers();
 
     try {
+        console.log("Iniciando auto-sincronización...");
         // Sync Users
         for (const user of localUsers) {
             await setDoc(doc(db, "users", user.id), user);
         }
         // Sync Entries
+        // Upload recent ones first
         const entryBatch = localEntries.slice(0, 500); 
         for (const entry of entryBatch) {
             await setDoc(doc(db, "entries", entry.id), {
@@ -238,9 +228,14 @@ export const syncLocalToCloud = async () => {
                 dateStr: entry.dateStr
             });
         }
-        alert("Sincronización completada: Datos locales subidos a la nube.");
+        console.log("Auto-sincronización completada.");
+        if (!silent) {
+            alert("Sincronización completada: Datos locales subidos a la nube.");
+        }
     } catch (e) {
         console.error("Sync error", e);
-        alert("Hubo un error al subir los datos locales.");
+        if (!silent) {
+            alert("Hubo un error al subir los datos locales.");
+        }
     }
 };

@@ -32,7 +32,8 @@ import {
     LineChart as LineChartIcon,
     Cloud,
     CloudOff,
-    UploadCloud
+    UploadCloud,
+    RefreshCw
 } from 'lucide-react';
 import { ActivityChart, ComparisonChart } from './components/DashboardCharts';
 import { DEFAULT_USERS, User, IsinEntry, TimeFrame, FirebaseConfig } from './types';
@@ -137,6 +138,7 @@ export default function App() {
     
     // Cloud Config State
     const [isCloudConnected, setIsCloudConnected] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
     
     // Theme State
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -169,7 +171,8 @@ export default function App() {
 
     // Load data & Setup Subscriptions
     useEffect(() => {
-        setIsCloudConnected(storage.isOnline());
+        const cloudStatus = storage.isOnline();
+        setIsCloudConnected(cloudStatus);
         
         // Initial Load
         setEntries(storage.getEntries());
@@ -187,47 +190,39 @@ export default function App() {
             storage.setCurrentUser(activeUser.id);
         }
 
+        // AUTO-SYNC ON MOUNT:
+        // If we are online, we immediately attempt to push our local data to the cloud.
+        // This ensures the "Master" device (the one with the data) populates the cloud
+        // for other devices to see.
+        if (cloudStatus) {
+            setIsSyncing(true);
+            storage.syncLocalToCloud(true).finally(() => {
+                setTimeout(() => setIsSyncing(false), 2000);
+            });
+        }
+
         // Real-time Subscriptions (If online)
         const unsubEntries = storage.subscribeToEntries((newEntries) => {
             setEntries(newEntries);
         });
 
-        // ----------------------------------------------------
-        // AUTO-SYNC LOGIC (CRITICAL FOR FIRST TIME UPLOAD)
-        // ----------------------------------------------------
         const unsubUsers = storage.subscribeToUsers((cloudUsers) => {
-            // "Anti-burro" logic:
-            // If I have local users (like Alexander) that are NOT in the cloud list,
-            // it means I created them offline or before connecting.
-            // I must push them to the cloud so everyone else can see them.
+            setUsers(cloudUsers);
             
-            const localUsers = storage.getUsers();
+            // Check if our current local user was just wiped or doesn't exist in cloud (should be fixed by auto-sync above)
+            const current = storage.getCurrentUser();
+            const updatedCurrent = cloudUsers.find(u => u.id === current.id);
             
-            // Find users that exist locally but not in cloud
-            const missingInCloud = localUsers.filter(local => 
-                !cloudUsers.some(cloud => cloud.id === local.id)
-            );
-
-            if (missingInCloud.length > 0) {
-                console.log("Detectados usuarios locales no sincronizados. Subiendo a la nube...", missingInCloud);
-                // We add the missing ones to the cloud list to prevent overwriting existing ones
-                // Note: storage.saveUsers iterates and sets individual docs, so this is safe.
-                storage.saveUsers(missingInCloud).then(() => {
-                    console.log("Usuarios sincronizados con éxito.");
-                });
-            } else {
-                // Perfect sync, update UI
-                setUsers(cloudUsers);
-
-                // Re-validate current user in case they were deactivated remotely
-                const current = storage.getCurrentUser();
-                const updatedCurrent = cloudUsers.find(u => u.id === current.id);
-                if (updatedCurrent && !updatedCurrent.active) {
-                    const firstActive = cloudUsers.find(u => u.active) || cloudUsers[0];
-                    if (firstActive) {
-                        setCurrentUser(firstActive);
-                        storage.setCurrentUser(firstActive.id);
-                    }
+            if (updatedCurrent) {
+                if (!updatedCurrent.active) {
+                   const firstActive = cloudUsers.find(u => u.active) || cloudUsers[0];
+                   if (firstActive) {
+                       setCurrentUser(firstActive);
+                       storage.setCurrentUser(firstActive.id);
+                   }
+                } else {
+                    // Update local reference to match cloud (e.g. name change)
+                    setCurrentUser(updatedCurrent);
                 }
             }
         });
@@ -976,6 +971,7 @@ export default function App() {
                 <div className="flex items-center gap-2">
                     <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">I</div>
                     <span className="font-bold text-lg tracking-tight">Ibspot</span>
+                    {isSyncing && <RefreshCw size={14} className="animate-spin text-gray-400 ml-1" />}
                 </div>
                 <div className="flex items-center gap-3">
                      <button onClick={toggleTheme} className="p-2 text-gray-500 dark:text-gray-400">
@@ -1006,7 +1002,7 @@ export default function App() {
                         <SidebarItem icon={Users} label="Equipo" active={view === 'users'} onClick={() => setView('users')} />
                         <SidebarItem 
                             icon={isCloudConnected ? Cloud : CloudOff} 
-                            label="Nube / Sync" 
+                            label={isSyncing ? "Sincronizando..." : "Nube / Sync"}
                             active={view === 'cloud'} 
                             onClick={() => setView('cloud')} 
                             extraClass={isCloudConnected ? "text-green-600 dark:text-green-400" : ""}
@@ -1019,7 +1015,7 @@ export default function App() {
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{currentUser.name}</p>
                                 <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> Online
+                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> {isSyncing ? 'Sincronizando...' : 'Online'}
                                 </p>
                             </div>
                         </div>
