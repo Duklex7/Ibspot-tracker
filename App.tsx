@@ -97,6 +97,7 @@ const GoogleIcon = () => (
 
 const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () => void, onSave: (u: Partial<User>) => void }) => {
     const [name, setName] = useState(user.name);
+    const [email, setEmail] = useState(user.email);
     const [avatar, setAvatar] = useState(user.avatar);
     const [adminCode, setAdminCode] = useState('');
     const [showAdminInput, setShowAdminInput] = useState(false);
@@ -111,7 +112,7 @@ const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () =
     };
 
     const handleSave = () => {
-        const updates: Partial<User> = { name, avatar };
+        const updates: Partial<User> = { name, email, avatar };
         if (adminCode === 'ADMIN-IBSPOT') {
             updates.role = 'admin';
             alert("¡Privilegios de Administrador Activados!");
@@ -148,6 +149,18 @@ const EditProfileModal = ({ user, onClose, onSave }: { user: User, onClose: () =
                             onChange={(e) => setName(e.target.value)}
                             className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
                         />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Correo Electrónico</label>
+                        <input 
+                            type="email" 
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="ejemplo@ibspot.com"
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">Modifica esto si tu correo fue generado automáticamente.</p>
                     </div>
                     
                     {user.role === 'admin' ? (
@@ -1092,7 +1105,7 @@ export default function App() {
                                                     </div>
                                                 </td>
                                                 <td className="p-4 text-right">
-                                                    {entry.userId === currentUser.id && (
+                                                    {(entry.userId === currentUser.id || currentUser.role === 'admin') && (
                                                         <button onClick={() => handleDeleteEntry(entry.id)} className="text-gray-400 hover:text-red-500 transition-colors p-2">
                                                             <Trash2 size={18} />
                                                         </button>
