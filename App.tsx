@@ -119,11 +119,13 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
             await storage.loginWithGoogle();
             onLoginSuccess();
         } catch (err: any) {
-            console.error(err);
+            console.error("Login Error:", err);
             if (err.code === 'auth/popup-closed-by-user') {
                 setError("Inicio de sesión cancelado.");
+            } else if (err.code === 'auth/unauthorized-domain') {
+                setError("Dominio no autorizado. Verifica la consola de Firebase.");
             } else {
-                setError("Error al iniciar con Google.");
+                setError(`Error de Google: ${err.message || 'Desconocido'}`);
             }
             setLoading(false);
         }
@@ -143,17 +145,18 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
             }
             onLoginSuccess();
         } catch (err: any) {
-            console.error(err);
-            if (err.code === 'auth/invalid-credential') {
+            console.error("Submit Error:", err);
+            if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
                 setError("Correo o contraseña incorrectos.");
             } else if (err.code === 'auth/email-already-in-use') {
                 setError("Este correo ya está registrado.");
             } else if (err.code === 'auth/weak-password') {
                 setError("La contraseña debe tener al menos 6 caracteres.");
+            } else if (err.code === 'auth/network-request-failed') {
+                 setError("Error de red. Verifica tu conexión a internet.");
             } else {
-                setError("Error de conexión o datos inválidos.");
+                setError(err.message || "Error al conectar. Intenta nuevamente.");
             }
-        } finally {
             setLoading(false);
         }
     };
@@ -171,11 +174,12 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
 
                 {/* Google Sign In Button */}
                 <button 
+                    type="button" 
                     onClick={handleGoogleLogin}
                     disabled={loading}
                     className="w-full bg-white dark:bg-slate-700 text-gray-700 dark:text-white font-medium py-3 rounded-xl border border-gray-300 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors flex items-center justify-center mb-6 shadow-sm"
                 >
-                    <GoogleIcon />
+                    {loading ? <Loader2 className="animate-spin mr-2" size={20}/> : <GoogleIcon />}
                     Continuar con Google
                 </button>
 
@@ -212,7 +216,7 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
                                     value={name}
                                     onChange={e => setName(e.target.value)}
                                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
-                                    required
+                                    required={isRegistering}
                                 />
                             </div>
                         </>
@@ -243,8 +247,8 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
                     </div>
 
                     {error && (
-                        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-xl text-sm flex items-center gap-2">
-                            <AlertCircle size={16} /> {error}
+                        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-xl text-sm flex items-center gap-2 animate-fade-in">
+                            <AlertCircle size={16} className="shrink-0" /> <span className="break-words">{error}</span>
                         </div>
                     )}
 
@@ -259,6 +263,7 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
 
                 <div className="mt-6 text-center">
                     <button 
+                        type="button"
                         onClick={() => { setIsRegistering(!isRegistering); setError(null); }}
                         className="text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                     >

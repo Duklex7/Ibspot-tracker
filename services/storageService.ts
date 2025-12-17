@@ -49,10 +49,18 @@ export const initializeCloud = () => {
     try {
         if (!firebaseApp) {
             firebaseApp = initializeApp(SHARED_CONFIG);
-            db = getFirestore(firebaseApp);
-            auth = getAuth(firebaseApp);
-            isCloudEnabled = true;
-            console.log("Ibspot Cloud & Auth Connected");
+            
+            // Try initializing services individually to catch specific errors
+            try {
+                db = getFirestore(firebaseApp);
+                auth = getAuth(firebaseApp);
+                isCloudEnabled = true;
+                console.log("Ibspot Cloud & Auth Connected");
+            } catch (serviceError) {
+                console.error("Firebase Service Initialization Failed:", serviceError);
+                // We keep firebaseApp but disable cloud features if services fail
+                isCloudEnabled = false;
+            }
         }
     } catch (e) {
         console.error("Error connecting to cloud:", e);
@@ -68,17 +76,35 @@ export const isOnline = () => isCloudEnabled;
 // --- Authentication ---
 
 export const subscribeToAuth = (callback: (user: User | null) => void) => {
-    if (!auth) return () => {};
+    if (!auth) {
+        // console.warn("Auth not initialized yet");
+        return () => {};
+    }
     return onAuthStateChanged(auth, async (firebaseUser) => {
         if (firebaseUser) {
+            // Check if db is initialized
+            if (!db) {
+                 const fallbackUser: User = {
+                    id: firebaseUser.uid,
+                    name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
+                    email: firebaseUser.email || '',
+                    avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+                    active: true
+                };
+                callback(fallbackUser);
+                return;
+            }
+
             // Get user profile from Firestore
-            if (db) {
+            try {
                 const userDocRef = doc(db, "users", firebaseUser.uid);
                 const userDoc = await getDoc(userDocRef);
+                
                 if (userDoc.exists()) {
                     callback(userDoc.data() as User);
                 } else {
-                    // Fallback / Auto-repair profile from Auth data
+                    // Profile doesn't exist yet (maybe created via console or minimal auth)
+                    // Auto-repair profile
                     const newUser: User = {
                         id: firebaseUser.uid,
                         name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
@@ -86,8 +112,22 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
                         avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
                         active: true
                     };
+                    // Try to save it silently
+                    setDoc(userDocRef, newUser).catch(err => console.error("Auto-repair profile failed", err));
+                    
                     callback(newUser);
                 }
+            } catch (err) {
+                console.error("Error fetching user profile:", err);
+                // Fallback to basic auth info
+                const fallbackUser: User = {
+                    id: firebaseUser.uid,
+                    name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
+                    email: firebaseUser.email || '',
+                    avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+                    active: true
+                };
+                callback(fallbackUser);
             }
         } else {
             callback(null);
@@ -96,24 +136,30 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
 };
 
 export const loginUser = async (email: string, pass: string) => {
-    if (!auth) throw new Error("No hay conexión");
+    if (!auth) throw new Error("No hay conexión con el servicio de autenticación.");
     await signInWithEmailAndPassword(auth, email, pass);
 };
 
 export const loginWithGoogle = async () => {
-    if (!auth || !db) throw new Error("No hay conexión");
+    if (!auth) throw new Error("No hay conexión con el servicio de autenticación.");
     const provider = new GoogleAuthProvider();
     
     try {
         const result = await signInWithPopup(auth, provider);
         const user = result.user;
 
+        if (!db) return; // Auth succeeded but no DB, just return
+
         // Check if user profile exists in Firestore
         const userDocRef = doc(db, "users", user.uid);
-        const userDoc = await getDoc(userDocRef);
+        let userDoc;
+        try {
+             userDoc = await getDoc(userDocRef);
+        } catch (e) {
+            console.warn("Could not check existing doc, assuming creation needed");
+        }
 
-        if (!userDoc.exists()) {
-            // Create new profile automatically using Google data
+        if (!userDoc || !userDoc.exists()) {
             const newUser: User = {
                 id: user.uid,
                 name: user.displayName || "Usuario Google",
@@ -130,23 +176,38 @@ export const loginWithGoogle = async () => {
 };
 
 export const registerUser = async (email: string, pass: string, name: string, avatarDataUrl?: string) => {
-    if (!auth || !db) throw new Error("No hay conexión");
+    if (!auth) throw new Error("No hay conexión con el servicio de autenticación.");
     
     // 1. Create Auth User
     const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
     const uid = userCredential.user.uid;
     
     // 2. Create Firestore Profile
-    const newUser: User = {
-        id: uid,
-        name: name,
-        email: email,
-        avatar: avatarDataUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
-        active: true
-    };
-    
-    await setDoc(doc(db, "users", uid), newUser);
-    return newUser;
+    if (db) {
+        const newUser: User = {
+            id: uid,
+            name: name,
+            email: email,
+            avatar: avatarDataUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+            active: true
+        };
+        
+        try {
+            await setDoc(doc(db, "users", uid), newUser);
+        } catch (e) {
+            console.error("Profile creation failed, but Auth succeeded. User can still login.", e);
+        }
+        return newUser;
+    } else {
+         // Fallback if DB is down but Auth works
+         return {
+            id: uid,
+            name: name,
+            email: email,
+            avatar: avatarDataUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
+            active: true
+         };
+    }
 };
 
 export const logoutUser = async () => {
@@ -168,7 +229,7 @@ export const subscribeToEntries = (callback: (entries: IsinEntry[]) => void) => 
         localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(entries));
         callback(entries);
     }, (error) => {
-        console.error("Cloud Sync Error:", error);
+        console.error("Cloud Sync Error (Entries):", error);
     });
 };
 
@@ -185,6 +246,8 @@ export const subscribeToUsers = (callback: (users: User[]) => void) => {
             localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
             callback(users);
         }
+    }, (error) => {
+         console.error("Cloud Sync Error (Users):", error);
     });
 };
 
