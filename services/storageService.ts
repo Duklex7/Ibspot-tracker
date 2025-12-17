@@ -11,7 +11,8 @@ import {
     doc,
     setDoc,
     getDocs,
-    updateDoc
+    updateDoc,
+    deleteDoc
 } from 'firebase/firestore';
 
 const STORAGE_KEY_ENTRIES = 'ibspot_entries';
@@ -121,6 +122,22 @@ export const saveEntry = async (entry: IsinEntry): Promise<void> => {
         } catch (e) {
             console.error("Error saving to cloud", e);
             alert("Error guardando en la nube. Verifique conexión.");
+        }
+    }
+};
+
+export const deleteEntry = async (id: string): Promise<void> => {
+    // 1. Local
+    const existing = getEntriesLocal();
+    const updated = existing.filter(e => e.id !== id);
+    localStorage.setItem(STORAGE_KEY_ENTRIES, JSON.stringify(updated));
+
+    // 2. Cloud
+    if (isCloudEnabled && db) {
+        try {
+            await deleteDoc(doc(db, "entries", id));
+        } catch (e) {
+            console.error("Error deleting from cloud", e);
         }
     }
 };
