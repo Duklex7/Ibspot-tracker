@@ -73,17 +73,24 @@ const formatDate = (dateStr: string) => {
 
 // --- Components ---
 
-const SidebarItem = ({ icon: Icon, label, active, onClick, extraClass = "" }: any) => (
+const SidebarItem = ({ icon: Icon, label, active, onClick, extraClass = "", badge = null }: any) => (
     <button
         onClick={onClick}
-        className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${
+        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-200 ${
             active 
             ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-medium' 
             : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-gray-900 dark:hover:text-white'
         } ${extraClass}`}
     >
-        <Icon size={20} strokeWidth={active ? 2.5 : 2} />
-        <span>{label}</span>
+        <div className="flex items-center space-x-3">
+            <Icon size={20} strokeWidth={active ? 2.5 : 2} />
+            <span>{label}</span>
+        </div>
+        {badge && (
+            <span className="text-[10px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded-full ml-2">
+                {badge}
+            </span>
+        )}
     </button>
 );
 
@@ -612,9 +619,6 @@ export default function App() {
 
     // Reuse existing render logic for Dashboard, History, Users (no change needed in logic, just routing)
     const renderDashboard = () => (
-        // ... (Same dashboard code as previous, but inserted here implicitly by structure)
-        // Since I'm in "replace file" mode, I need to include the FULL content of renderDashboard again
-        // to ensure the file is complete.
         <div className="max-w-6xl mx-auto space-y-8 animate-fade-in">
              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -1022,6 +1026,7 @@ export default function App() {
                             active={view === 'cloud'} 
                             onClick={() => setView('cloud')}
                             extraClass={isCloudConnected ? "text-green-600 dark:text-green-400" : ""}
+                            badge={!isCloudConnected ? "NUEVO" : null}
                         />
                     </div>
                 </div>
