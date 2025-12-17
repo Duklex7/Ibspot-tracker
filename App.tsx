@@ -1089,7 +1089,14 @@ export default function App() {
                                     </tr>
                                 ) : (
                                     filteredHistory.map((entry) => {
-                                        const user = users.find(u => u.id === entry.userId);
+                                        // Improved User Lookup Logic:
+                                        // 1. Try finding in global list
+                                        let user = users.find(u => u.id === entry.userId);
+                                        // 2. Fallback: If not found but matches current logged-in user, use that info
+                                        if (!user && currentUser && currentUser.id === entry.userId) {
+                                            user = currentUser;
+                                        }
+
                                         return (
                                             <tr key={entry.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                                                 <td className="p-4 text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">
@@ -1100,8 +1107,16 @@ export default function App() {
                                                 </td>
                                                 <td className="p-4">
                                                     <div className="flex items-center gap-2">
-                                                        <img src={user?.avatar} className="w-6 h-6 rounded-full bg-gray-200" alt=""/>
-                                                        <span className="text-sm text-gray-700 dark:text-gray-200">{user?.name}</span>
+                                                        <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                                                            {user?.avatar ? (
+                                                                <img src={user.avatar} className="w-full h-full object-cover" alt={user.name} />
+                                                            ) : (
+                                                                <UserIcon size={14} className="text-gray-500" />
+                                                            )}
+                                                        </div>
+                                                        <span className="text-sm text-gray-700 dark:text-gray-200">
+                                                            {user?.name || 'Desconocido'}
+                                                        </span>
                                                     </div>
                                                 </td>
                                                 <td className="p-4 text-right">
