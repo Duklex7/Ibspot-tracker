@@ -19,7 +19,9 @@ import {
     signOut, 
     onAuthStateChanged, 
     User as FirebaseUser,
-    Auth
+    Auth,
+    GoogleAuthProvider,
+    signInWithPopup
 } from 'firebase/auth';
 
 const STORAGE_KEY_ENTRIES = 'ibspot_entries';
@@ -76,14 +78,15 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
                 if (userDoc.exists()) {
                     callback(userDoc.data() as User);
                 } else {
-                    // Fallback if auth exists but firestore doc doesn't (shouldn't happen with correct register flow)
-                    callback({
+                    // Fallback / Auto-repair profile from Auth data
+                    const newUser: User = {
                         id: firebaseUser.uid,
-                        name: firebaseUser.email?.split('@')[0] || 'Usuario',
+                        name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
                         email: firebaseUser.email || '',
-                        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+                        avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
                         active: true
-                    });
+                    };
+                    callback(newUser);
                 }
             }
         } else {
@@ -95,6 +98,35 @@ export const subscribeToAuth = (callback: (user: User | null) => void) => {
 export const loginUser = async (email: string, pass: string) => {
     if (!auth) throw new Error("No hay conexión");
     await signInWithEmailAndPassword(auth, email, pass);
+};
+
+export const loginWithGoogle = async () => {
+    if (!auth || !db) throw new Error("No hay conexión");
+    const provider = new GoogleAuthProvider();
+    
+    try {
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+
+        // Check if user profile exists in Firestore
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+
+        if (!userDoc.exists()) {
+            // Create new profile automatically using Google data
+            const newUser: User = {
+                id: user.uid,
+                name: user.displayName || "Usuario Google",
+                email: user.email || "",
+                avatar: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+                active: true
+            };
+            await setDoc(userDocRef, newUser);
+        }
+    } catch (error) {
+        console.error("Google Login Error", error);
+        throw error;
+    }
 };
 
 export const registerUser = async (email: string, pass: string, name: string, avatarDataUrl?: string) => {
