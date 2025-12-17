@@ -123,6 +123,8 @@ const LoginScreen = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
             if (err.code === 'auth/popup-closed-by-user') {
                 setError("Inicio de sesión cancelado.");
             } else if (err.code === 'auth/unauthorized-domain') {
+                // This shouldn't be reached if storageService handles it, 
+                // but as a fallback:
                 setError("Dominio no autorizado. Verifica la consola de Firebase.");
             } else {
                 setError(`Error de Google: ${err.message || 'Desconocido'}`);
@@ -949,12 +951,16 @@ export default function App() {
     const renderCloudConfig = () => (
         <div className="max-w-2xl mx-auto">
              <div className="text-center py-8">
-                 <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Cloud size={40} className="text-green-600 dark:text-green-400" />
+                 <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 ${isCloudConnected ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'}`}>
+                    {isCloudConnected ? <Cloud size={40} /> : <CloudOff size={40} />}
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Conexión Segura Establecida</h3>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                    {isCloudConnected ? 'Conexión Segura Establecida' : 'Modo Local (Offline)'}
+                </h3>
                 <p className="text-gray-500 mt-2">
-                    Tu cuenta está sincronizada en tiempo real. Todos los datos que ingreses se guardarán automáticamente en tu cuenta.
+                    {isCloudConnected 
+                        ? 'Tu cuenta está sincronizada en tiempo real. Todos los datos se guardan automáticamente en tu cuenta.' 
+                        : 'Estás operando en modo local. Tus datos se guardan en este dispositivo. Esto ocurre si el dominio no está autorizado o no hay internet.'}
                 </p>
                 <div className="mt-8">
                     <p className="text-sm text-gray-400">ID de Sesión: <span className="font-mono">{currentUser.id}</span></p>
@@ -999,11 +1005,11 @@ export default function App() {
                         <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">Comunidad</div>
                         <SidebarItem icon={Users} label="Equipo" active={view === 'users'} onClick={() => setView('users')} />
                         <SidebarItem 
-                            icon={Cloud} 
-                            label="Estado Nube"
+                            icon={isCloudConnected ? Cloud : CloudOff} 
+                            label={isCloudConnected ? "Estado Nube" : "Modo Local"}
                             active={view === 'cloud'} 
                             onClick={() => setView('cloud')} 
-                            extraClass="text-green-600 dark:text-green-400"
+                            extraClass={isCloudConnected ? "text-green-600 dark:text-green-400" : "text-orange-500 dark:text-orange-400"}
                         />
                     </nav>
 
